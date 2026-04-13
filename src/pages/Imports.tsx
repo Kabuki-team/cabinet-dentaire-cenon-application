@@ -69,6 +69,13 @@ export function Imports() {
   };
 
   const parseFile = (file: File, type: 'doctolib' | 'logosw' | 'logosw_patients') => {
+    const ext = file.name.split('.').pop()?.toLowerCase() ?? '';
+    if (!['csv', 'xlsx', 'xls'].includes(ext)) {
+      setErrorMsg(`Format non supporté : « .${ext} ». Seuls les fichiers CSV et Excel (.xlsx, .xls) sont acceptés.`);
+      setFileNames(p => ({ ...p, [type]: null }));
+      setLoading(prev => ({ ...prev, [type]: false }));
+      return;
+    }
     setLoading(prev => ({ ...prev, [type]: true }));
     setErrorMsg(null);
     const reader = new FileReader();
@@ -702,10 +709,12 @@ export function Imports() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
-        <button className={`btn ${activeTab === 'history' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setActiveTab('history')}><HistoryIcon size={18} /> Historique</button>
-        <button className={`btn ${activeTab === 'new' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setActiveTab('new')}><CheckCircle size={18} /> Nouvel Import</button>
-        <button className="btn btn-outline" onClick={() => setShowResetModal(true)} style={{ color: 'var(--danger-text)', marginLeft: '0.5rem' }}>Réinitialiser</button>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
+        <div>
+          <h1 style={{ fontSize: '1.875rem', fontWeight: 600, marginBottom: '0.5rem' }}>Imports</h1>
+          <p style={{ color: 'var(--text-muted)' }}>Chargez vos fichiers Doctolib et LogosW pour mettre à jour les données du cabinet.</p>
+        </div>
+        <button className="btn btn-outline" onClick={() => setShowResetModal(true)} style={{ color: 'var(--danger-text)' }}><Trash2 size={16} /> Réinitialiser toutes les données</button>
       </div>
 
       {showResetModal && (
@@ -724,44 +733,7 @@ export function Imports() {
         </div>
       )}
 
-      {activeTab === 'history' ? (
-        <div className="card">
-           <h3 style={{ marginBottom: '1.5rem' }}>Historique des analyses</h3>
-           {history.length === 0 ? (
-             <div style={{ textAlign: 'center', padding: '3rem', opacity: 0.5 }}> <FileText size={48} style={{ margin: '0 auto 1rem' }} /> <p>Aucun historique pour le moment</p> </div>
-           ) : (
-             <div className="table-container">
-               <table>
-                 <thead><tr><th>Date Import</th><th>Source / Période</th><th>Enregistrements</th><th>Honoraires réalisés</th><th>Montant encaissé</th><th style={{textAlign:'right'}}>Détails / Actions</th></tr></thead>
-                 <tbody>
-                   {history.map((h: any) => (
-                     <tr key={h.id}>
-                       <td>{new Date(h.timestamp).toLocaleString('fr-FR')}</td>
-                       <td style={{ whiteSpace: 'pre-wrap', fontSize: '0.85rem' }}>{h.source}</td>
-                       <td style={{ fontWeight: 600 }}>{h.count}</td>
-                       <td style={{ color: 'green' }}>{Number(h.prod).toLocaleString()} €</td>
-                       <td style={{ color: '#3b82f6' }}>{Number(h.enc).toLocaleString()} €</td>
-                       <td style={{textAlign:'right'}}>
-                          <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', alignItems: 'center' }}>
-                            {h.anomalies && h.anomalies.length > 0 && (
-                               <button onClick={() => setSelectedAnomalies(h.anomalies)} className="btn btn-outline" style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem', borderColor: 'var(--danger-border)', color: 'var(--danger-text)' }}>
-                                 <ShieldAlert size={14} /> {h.anomalies.length} Anomalie(s)
-                               </button>
-                            )}
-                            {h.import_id && (
-                               <button onClick={() => deleteImport(h.import_id)} className="btn btn-ghost" style={{padding:'0.25rem', color:'var(--text-muted)'}} title="Supprimer cet import"><Trash2 size={16} /></button>
-                            )}
-                          </div>
-                       </td>
-                     </tr>
-                   ))}
-                 </tbody>
-               </table>
-             </div>
-           )}
-        </div>
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
           {errorMsg && (
             <div style={{ backgroundColor: 'var(--danger-bg)', color: 'var(--danger-text)', display: 'flex', gap: '1rem', alignItems: 'center', padding: '1rem 1.25rem', borderRadius: '0.75rem', border: '1px solid var(--danger)', fontSize: '0.875rem' }}>
               <ShieldAlert size={18} style={{ flexShrink: 0 }} /> {errorMsg}
@@ -795,7 +767,7 @@ export function Imports() {
                     onDrop={e => { e.preventDefault(); setDragOver(p => ({ ...p, [type]: false })); const f = e.dataTransfer.files[0]; if (f) { setStats(null); setFileNames(p => ({ ...p, [type]: f.name })); parseFile(f, type); } }}
                     style={{ border: `2px dashed ${borderColor}`, padding: '1.5rem 1rem', textAlign: 'center', cursor: 'pointer', borderRadius: '0.75rem', backgroundColor: bgColor, transition: 'all 0.2s' }}
                   >
-                    <input type="file" accept=".csv,.xlsx,.xls" ref={doctolibFileRef} style={{ display: 'none' }} onChange={e => { const f = e.target.files?.[0]; if (f) { setStats(null); setFileNames(p => ({ ...p, [type]: f.name })); parseFile(f, type); } }} />
+                    <input type="file" accept=".csv,.xlsx,.xls" ref={doctolibFileRef} style={{ display: 'none' }} onChange={e => { const f = e.target.files?.[0]; if (f) { setStats(null); setFileNames(p => ({ ...p, [type]: f.name })); parseFile(f, type); e.target.value = ''; } }} />
                     {loading[type] ? (
                       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.5rem', color: 'var(--primary)' }}>
                         <Loader2 size={24} className="animate-spin" />
@@ -856,7 +828,7 @@ export function Imports() {
                     onDrop={e => { e.preventDefault(); setDragOver(p => ({ ...p, [type]: false })); const f = e.dataTransfer.files[0]; if (f) { setStats(null); setFileNames(p => ({ ...p, [type]: f.name })); parseFile(f, type); } }}
                     style={{ border: `2px dashed ${borderColor}`, padding: '1.5rem 1rem', textAlign: 'center', cursor: 'pointer', borderRadius: '0.75rem', backgroundColor: bgColor, transition: 'all 0.2s' }}
                   >
-                    <input type="file" accept=".csv,.xlsx,.xls" ref={logoswFileRef} style={{ display: 'none' }} onChange={e => { const f = e.target.files?.[0]; if (f) { setStats(null); setFileNames(p => ({ ...p, [type]: f.name })); parseFile(f, type); } }} />
+                    <input type="file" accept=".csv,.xlsx,.xls" ref={logoswFileRef} style={{ display: 'none' }} onChange={e => { const f = e.target.files?.[0]; if (f) { setStats(null); setFileNames(p => ({ ...p, [type]: f.name })); parseFile(f, type); e.target.value = ''; } }} />
                     {loading[type] ? (
                       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.5rem', color: 'var(--primary)' }}>
                         <Loader2 size={24} className="animate-spin" />
@@ -920,7 +892,7 @@ export function Imports() {
                     onDrop={e => { e.preventDefault(); setDragOver(p => ({ ...p, [type]: false })); const f = e.dataTransfer.files[0]; if (f) { setStats(null); setFileNames(p => ({ ...p, [type]: f.name })); parseFile(f, type); } }}
                     style={{ border: `2px dashed ${borderColor}`, padding: '1.5rem 1rem', textAlign: 'center', cursor: 'pointer', borderRadius: '0.75rem', backgroundColor: bgColor, transition: 'all 0.2s' }}
                   >
-                    <input type="file" accept=".csv,.xlsx,.xls" ref={logoswPatientsRef} style={{ display: 'none' }} onChange={e => { const f = e.target.files?.[0]; if (f) { setStats(null); setFileNames(p => ({ ...p, [type]: f.name })); parseFile(f, type); } }} />
+                    <input type="file" accept=".csv,.xlsx,.xls" ref={logoswPatientsRef} style={{ display: 'none' }} onChange={e => { const f = e.target.files?.[0]; if (f) { setStats(null); setFileNames(p => ({ ...p, [type]: f.name })); parseFile(f, type); e.target.value = ''; } }} />
                     {loading[type] ? (
                       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.5rem', color: 'var(--primary)' }}>
                         <Loader2 size={24} className="animate-spin" />
@@ -957,142 +929,6 @@ export function Imports() {
               );
             })()}
           </div>
-
-          {/* Guide d'export */}
-          {(() => {
-            const GUIDE_SECTIONS = [
-              {
-                id: 'doctolib',
-                label: 'Étape 1 — Agenda Doctolib',
-                badge: 'Obligatoire',
-                badgeColor: 'var(--primary)',
-                badgeBg: 'var(--primary-light)',
-                intro: "Exportez l'historique des rendez-vous depuis votre espace pro Doctolib. Un accès administrateur est requis.",
-                steps: [
-                  { text: <>Connectez-vous sur <strong>pro.doctolib.fr</strong></> },
-                  { text: <>Cliquez sur vos <strong>initiales / photo</strong> en haut à droite</> },
-                  { text: <>Allez dans <strong>Paramètres avancés → Données → Exports</strong></> },
-                  { text: <><strong>Type de données</strong> : sélectionnez <em>Historique de RDV</em></> },
-                  { text: <>Choisissez la <strong>période</strong> (ex : mois en cours ou année entière)</> },
-                  { text: <>Cliquez <strong>Exporter le fichier</strong>, saisissez votre mot de passe si demandé</> },
-                  { text: <>Attendez le statut <strong>« Prêt »</strong> puis cliquez sur le nom du fichier pour le télécharger</> },
-                ],
-                note: "Si l'option est grisée, vous n'avez pas les droits d'export. Contactez le support Doctolib en précisant votre statut de praticien administrateur.",
-                link: { label: 'Ouvrir Doctolib Pro', url: 'https://pro.doctolib.fr' },
-              },
-              {
-                id: 'logosw',
-                label: 'Étape 2 — Comptabilité LogosW',
-                badge: 'Obligatoire',
-                badgeColor: 'var(--primary)',
-                badgeBg: 'var(--primary-light)',
-                intro: "Exportez le journal des actes et règlements depuis le module comptabilité de LogosW.",
-                steps: [
-                  { text: <>Ouvrez <strong>LogosW</strong> sur votre poste de travail</> },
-                  { text: <>Dans le menu principal, cliquez sur <strong>Statistiques</strong> ou <strong>Comptabilité</strong></> },
-                  { text: <>Accédez à la section <strong>Exports</strong> ou <strong>Journal de caisse / Relevé d'actes</strong></> },
-                  { text: <>Sélectionnez la <strong>période</strong> souhaitée (mensuelle ou personnalisée)</> },
-                  { text: <>Choisissez le format de sortie : <strong>CSV</strong> ou <strong>Excel (.xlsx)</strong></> },
-                  { text: <>Cliquez sur <strong>Exporter</strong> et sauvegardez le fichier sur votre bureau</> },
-                ],
-                note: "Le fichier doit contenir les colonnes : date, montant_acte, reglement_somme, libelle, praticien. En cas de doute, contactez le support LogosW au 02 99 84 11 44.",
-                link: { label: 'Site LogosW', url: 'https://www.logosw.net' },
-              },
-              {
-                id: 'logosw_patients',
-                label: 'Optionnel — Dictionnaire patients LogosW',
-                badge: 'Recommandé',
-                badgeColor: '#6d28d9',
-                badgeBg: '#ede9fe',
-                intro: "Ce fichier permet à l'outil de croiser automatiquement les dossiers Doctolib et LogosW (même patient, noms légèrement différents). Très utile pour les patients anciens.",
-                steps: [
-                  { text: <>Ouvrez <strong>LogosW</strong> sur votre poste</> },
-                  { text: <>Allez dans <strong>Fichiers → Patients</strong> ou <strong>Liste des dossiers patients</strong></> },
-                  { text: <>Utilisez la fonction <strong>Exporter / Imprimer vers fichier</strong></> },
-                  { text: <>Sélectionnez les champs : <strong>Nom, Prénom, Date de naissance, N° dossier</strong></> },
-                  { text: <>Exportez en <strong>CSV</strong> ou <strong>Excel</strong> et sauvegardez le fichier</> },
-                ],
-                note: "Sans ce fichier, le croisement se fait sur la similarité des noms (moins précis). Avec ce fichier, le taux de matching approche 95–100%.",
-                link: null,
-              },
-            ];
-
-            return (
-              <div style={{ border: '1px solid var(--border)', borderRadius: '0.75rem', overflow: 'hidden', backgroundColor: 'var(--card)' }}>
-                {/* En-tête guide */}
-                <div style={{ padding: '1rem 1.25rem', borderBottom: openGuideSection !== null ? '1px solid var(--border)' : 'none', backgroundColor: 'var(--bg)', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                  <BookOpen size={18} color="var(--primary)" />
-                  <span style={{ fontWeight: 600, fontSize: '0.9rem', flex: 1 }}>Guide : comment récupérer les fichiers ?</span>
-                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Cliquez sur une section pour l'ouvrir</span>
-                </div>
-
-                {/* Sections accordéon */}
-                <div style={{ display: 'flex', flexDirection: 'column' }}>
-                  {GUIDE_SECTIONS.map((section, idx) => {
-                    const isOpen = openGuideSection === section.id;
-                    return (
-                      <div key={section.id} style={{ borderTop: idx > 0 ? '1px solid var(--border)' : 'none' }}>
-                        {/* Header section */}
-                        <button
-                          onClick={() => setOpenGuideSection(isOpen ? null : section.id)}
-                          style={{
-                            width: '100%', display: 'flex', alignItems: 'center', gap: '0.75rem',
-                            padding: '0.875rem 1.25rem', background: 'none', border: 'none',
-                            cursor: 'pointer', textAlign: 'left',
-                            backgroundColor: isOpen ? 'var(--primary-light)' : 'transparent',
-                            transition: 'background-color 0.15s',
-                          }}
-                        >
-                          {isOpen
-                            ? <ChevronDown size={16} color="var(--primary)" />
-                            : <ChevronRight size={16} color="var(--text-muted)" />}
-                          <span style={{ fontWeight: 600, fontSize: '0.875rem', flex: 1, color: isOpen ? 'var(--primary)' : 'var(--text)' }}>
-                            {section.label}
-                          </span>
-                          <span style={{
-                            fontSize: '0.65rem', fontWeight: 700, padding: '2px 8px', borderRadius: '9999px',
-                            backgroundColor: section.badgeBg, color: section.badgeColor,
-                          }}>{section.badge}</span>
-                        </button>
-
-                        {/* Contenu section */}
-                        {isOpen && (
-                          <div style={{ padding: '1rem 1.5rem 1.25rem', backgroundColor: 'white', borderTop: '1px solid var(--border)' }}>
-                            <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '1rem', lineHeight: 1.6 }}>
-                              {section.intro}
-                            </p>
-                            <ol style={{ margin: 0, paddingLeft: '1.25rem', display: 'flex', flexDirection: 'column', gap: '0.55rem' }}>
-                              {section.steps.map((step, i) => (
-                                <li key={i} style={{ fontSize: '0.85rem', color: 'var(--text)', lineHeight: 1.6 }}>
-                                  {step.text}
-                                </li>
-                              ))}
-                            </ol>
-                            {section.note && (
-                              <div style={{ marginTop: '1rem', padding: '0.6rem 0.85rem', backgroundColor: '#fef9c3', borderLeft: '3px solid #f59e0b', borderRadius: '0 0.375rem 0.375rem 0', fontSize: '0.78rem', color: '#78350f', lineHeight: 1.5 }}>
-                                <strong>Note :</strong> {section.note}
-                              </div>
-                            )}
-                            {section.link && (
-                              <a
-                                href={section.link.url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', marginTop: '1rem', fontSize: '0.8rem', color: 'var(--primary)', fontWeight: 600, textDecoration: 'none' }}
-                              >
-                                <ExternalLink size={13} />
-                                {section.link.label}
-                              </a>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            );
-          })()}
 
           {(status.doctolib === 'success' && status.logosw === 'success' && !stats) && (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.75rem', padding: '0.5rem 0' }}>
@@ -1162,7 +998,167 @@ export function Imports() {
             </div>
           )}
         </div>
-      )}
+
+        {/* Historique des imports — toujours visible */}
+        <div className="card" style={{ padding: 0 }}>
+          <div style={{ padding: '1rem 1.5rem', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            <HistoryIcon size={18} color="var(--text-muted)" />
+            <h3 style={{ fontSize: '1rem', fontWeight: 600, margin: 0 }}>Historique des imports</h3>
+            <span style={{ marginLeft: 'auto', fontSize: '0.8rem', color: 'var(--text-muted)' }}>{history.length} entrée{history.length !== 1 ? 's' : ''}</span>
+          </div>
+          {history.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '2.5rem', opacity: 0.5 }}>
+              <FileText size={36} style={{ margin: '0 auto 0.75rem' }} />
+              <p style={{ fontSize: '0.875rem' }}>Aucun import effectué pour le moment</p>
+            </div>
+          ) : (
+            <div className="table-container" style={{ border: 'none', borderRadius: 0 }}>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Source / Période</th>
+                    <th>Enregistrements</th>
+                    <th style={{ textAlign: 'right' }}>Honoraires</th>
+                    <th style={{ textAlign: 'right' }}>Encaissé</th>
+                    <th style={{ textAlign: 'right' }}>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {history.map((h: any) => (
+                    <tr key={h.id}>
+                      <td style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>{new Date(h.timestamp).toLocaleString('fr-FR')}</td>
+                      <td style={{ whiteSpace: 'pre-wrap', fontSize: '0.85rem' }}>{h.source}</td>
+                      <td style={{ fontWeight: 600 }}>{h.count}</td>
+                      <td style={{ textAlign: 'right', color: 'var(--success-text)', fontWeight: 500 }}>{Number(h.prod).toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' })}</td>
+                      <td style={{ textAlign: 'right', color: 'var(--info-text)', fontWeight: 500 }}>{Number(h.enc).toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' })}</td>
+                      <td style={{ textAlign: 'right' }}>
+                        <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', alignItems: 'center' }}>
+                          {h.anomalies && h.anomalies.length > 0 && (
+                            <button onClick={() => setSelectedAnomalies(h.anomalies)} className="btn btn-outline" style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem', color: 'var(--danger-text)' }}>
+                              <ShieldAlert size={14} /> {h.anomalies.length} anomalie{h.anomalies.length > 1 ? 's' : ''}
+                            </button>
+                          )}
+                          {h.import_id && (
+                            <button onClick={() => deleteImport(h.import_id)} className="btn btn-ghost" style={{ padding: '0.25rem', color: 'var(--text-muted)' }} title="Supprimer cet import">
+                              <Trash2 size={16} />
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+        {/* Guide d'export — en bas, discret */}
+        {(() => {
+          const GUIDE_SECTIONS = [
+            {
+              id: 'doctolib',
+              label: 'Étape 1 — Agenda Doctolib',
+              badge: 'Obligatoire',
+              badgeColor: 'var(--primary)',
+              badgeBg: 'var(--primary-light)',
+              intro: "Exportez l'historique des rendez-vous depuis votre espace pro Doctolib. Un accès administrateur est requis.",
+              steps: [
+                { text: <>Connectez-vous sur <strong>pro.doctolib.fr</strong></> },
+                { text: <>Cliquez sur vos <strong>initiales / photo</strong> en haut à droite</> },
+                { text: <>Allez dans <strong>Paramètres avancés → Données → Exports</strong></> },
+                { text: <><strong>Type de données</strong> : sélectionnez <em>Historique de RDV</em></> },
+                { text: <>Choisissez la <strong>période</strong> (ex : mois en cours ou année entière)</> },
+                { text: <>Cliquez <strong>Exporter le fichier</strong>, saisissez votre mot de passe si demandé</> },
+                { text: <>Attendez le statut <strong>« Prêt »</strong> puis cliquez sur le nom du fichier pour le télécharger</> },
+              ],
+              note: "Si l'option est grisée, vous n'avez pas les droits d'export. Contactez le support Doctolib en précisant votre statut de praticien administrateur.",
+              link: { label: 'Ouvrir Doctolib Pro', url: 'https://pro.doctolib.fr' },
+            },
+            {
+              id: 'logosw',
+              label: 'Étape 2 — Comptabilité LogosW',
+              badge: 'Obligatoire',
+              badgeColor: 'var(--primary)',
+              badgeBg: 'var(--primary-light)',
+              intro: "Exportez le journal des actes et règlements depuis le module comptabilité de LogosW.",
+              steps: [
+                { text: <>Ouvrez <strong>LogosW</strong> sur votre poste de travail</> },
+                { text: <>Dans le menu principal, cliquez sur <strong>Statistiques</strong> ou <strong>Comptabilité</strong></> },
+                { text: <>Accédez à la section <strong>Exports</strong> ou <strong>Journal de caisse / Relevé d'actes</strong></> },
+                { text: <>Sélectionnez la <strong>période</strong> souhaitée (mensuelle ou personnalisée)</> },
+                { text: <>Choisissez le format de sortie : <strong>CSV</strong> ou <strong>Excel (.xlsx)</strong></> },
+                { text: <>Cliquez sur <strong>Exporter</strong> et sauvegardez le fichier sur votre bureau</> },
+              ],
+              note: "Le fichier doit contenir les colonnes : date, montant_acte, reglement_somme, libelle, praticien. En cas de doute, contactez le support LogosW au 02 99 84 11 44.",
+              link: { label: 'Site LogosW', url: 'https://www.logosw.net' },
+            },
+            {
+              id: 'logosw_patients',
+              label: 'Optionnel — Dictionnaire patients LogosW',
+              badge: 'Recommandé',
+              badgeColor: '#6d28d9',
+              badgeBg: '#ede9fe',
+              intro: "Ce fichier permet à l'outil de croiser automatiquement les dossiers Doctolib et LogosW. Très utile pour les patients anciens.",
+              steps: [
+                { text: <>Ouvrez <strong>LogosW</strong> sur votre poste</> },
+                { text: <>Allez dans <strong>Fichiers → Patients</strong> ou <strong>Liste des dossiers patients</strong></> },
+                { text: <>Utilisez la fonction <strong>Exporter / Imprimer vers fichier</strong></> },
+                { text: <>Sélectionnez les champs : <strong>Nom, Prénom, Date de naissance, N° dossier</strong></> },
+                { text: <>Exportez en <strong>CSV</strong> ou <strong>Excel</strong> et sauvegardez le fichier</> },
+              ],
+              note: "Sans ce fichier, le croisement se fait sur la similarité des noms. Avec ce fichier, le taux de matching approche 95–100%.",
+              link: null,
+            },
+          ];
+          return (
+            <div style={{ border: '1px solid var(--border)', borderRadius: '0.75rem', overflow: 'hidden', backgroundColor: 'var(--card)' }}>
+              <div style={{ padding: '0.875rem 1.25rem', borderBottom: openGuideSection !== null ? '1px solid var(--border)' : 'none', backgroundColor: 'var(--bg)', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                <BookOpen size={16} color="var(--text-muted)" />
+                <span style={{ fontWeight: 600, fontSize: '0.875rem', flex: 1, color: 'var(--text-muted)' }}>Guide : comment récupérer les fichiers ?</span>
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', opacity: 0.7 }}>Cliquez sur une section</span>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column' }}>
+                {GUIDE_SECTIONS.map((section, idx) => {
+                  const isOpen = openGuideSection === section.id;
+                  return (
+                    <div key={section.id} style={{ borderTop: idx > 0 ? '1px solid var(--border)' : 'none' }}>
+                      <button
+                        onClick={() => setOpenGuideSection(isOpen ? null : section.id)}
+                        style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.75rem 1.25rem', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left', backgroundColor: isOpen ? 'var(--primary-light)' : 'transparent', transition: 'background-color 0.15s' }}
+                      >
+                        {isOpen ? <ChevronDown size={15} color="var(--primary)" /> : <ChevronRight size={15} color="var(--text-muted)" />}
+                        <span style={{ fontWeight: 600, fontSize: '0.85rem', flex: 1, color: isOpen ? 'var(--primary)' : 'var(--text)' }}>{section.label}</span>
+                        <span style={{ fontSize: '0.65rem', fontWeight: 700, padding: '2px 8px', borderRadius: '9999px', backgroundColor: section.badgeBg, color: section.badgeColor }}>{section.badge}</span>
+                      </button>
+                      {isOpen && (
+                        <div style={{ padding: '1rem 1.5rem 1.25rem', backgroundColor: 'white', borderTop: '1px solid var(--border)' }}>
+                          <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '1rem', lineHeight: 1.6 }}>{section.intro}</p>
+                          <ol style={{ margin: 0, paddingLeft: '1.25rem', display: 'flex', flexDirection: 'column', gap: '0.55rem' }}>
+                            {section.steps.map((step, i) => (
+                              <li key={i} style={{ fontSize: '0.85rem', color: 'var(--text)', lineHeight: 1.6 }}>{step.text}</li>
+                            ))}
+                          </ol>
+                          {section.note && (
+                            <div style={{ marginTop: '1rem', padding: '0.6rem 0.85rem', backgroundColor: '#fef9c3', borderLeft: '3px solid #f59e0b', borderRadius: '0 0.375rem 0.375rem 0', fontSize: '0.78rem', color: '#78350f', lineHeight: 1.5 }}>
+                              <strong>Note :</strong> {section.note}
+                            </div>
+                          )}
+                          {section.link && (
+                            <a href={section.link.url} target="_blank" rel="noopener noreferrer" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', marginTop: '1rem', fontSize: '0.8rem', color: 'var(--primary)', fontWeight: 600, textDecoration: 'none' }}>
+                              <ExternalLink size={13} />{section.link.label}
+                            </a>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })()}
 
       {selectedAnomalies && (
         <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: '1rem' }} onClick={() => setSelectedAnomalies(null)}>
