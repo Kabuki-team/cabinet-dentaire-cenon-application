@@ -125,6 +125,13 @@ export const initDB = async () => {
   }
 
   try {
+    db.run(`ALTER TABLE patients ADD COLUMN nom_doctolib TEXT;`);
+    db.run(`ALTER TABLE patients ADD COLUMN nom_logosw TEXT;`);
+    db.run(`ALTER TABLE patients ADD COLUMN dossier_logosw TEXT;`);
+    db.run(`ALTER TABLE patients ADD COLUMN has_warning BOOLEAN DEFAULT 0;`);
+  } catch (e) {}
+
+  try {
     const res = db.exec("SELECT sql FROM sqlite_master WHERE type='table' AND name='clinical_acts'");
     if (res.length > 0 && String(res[0].values[0][0]).includes('UNIQUE')) {
        db.run("CREATE TABLE clinical_acts_new (id INTEGER PRIMARY KEY AUTOINCREMENT, patient_id INTEGER, date TEXT, libelle TEXT, montant_acte DECIMAL(10,2), reglement_somme DECIMAL(10,2), type TEXT, source TEXT, FOREIGN KEY(patient_id) REFERENCES patients(id))");
@@ -133,6 +140,26 @@ export const initDB = async () => {
        db.run("ALTER TABLE clinical_acts_new RENAME TO clinical_acts");
     }
   } catch (e) { console.warn("Schema fix notice:", e); }
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS patient_annotations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      patient_id INTEGER,
+      date_rendez_vous TEXT,
+      is_dismissed BOOLEAN DEFAULT 0,
+      comment TEXT,
+      timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(patient_id) REFERENCES patients(id),
+      UNIQUE(patient_id, date_rendez_vous)
+    );
+    CREATE TABLE IF NOT EXISTS logosw_dictionary (
+      dossier_id TEXT PRIMARY KEY,
+      nom TEXT,
+      prenom TEXT,
+      nom_complet_norm TEXT,
+      date_naissance TEXT
+    );
+  `);
 
   await saveDB();
   return db;

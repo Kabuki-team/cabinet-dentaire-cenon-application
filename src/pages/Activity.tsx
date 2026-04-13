@@ -44,8 +44,13 @@ export function Activity() {
 
       const MAP_PRATICIENS: Record<string, string> = { 
         "RM": "Dr. Réda Mechouk",
-        "RMe": "Dr. RMe (Dr Réda Mechouk externe ?)",
-        "RMr": "Dr. RMr (Dr Réda Mechouk remplaçant ?)"
+        "MF": "Dr. Medy Fakreldin",
+        "HG": "Dr. Hamza Gafsi",
+        "JL": "Dr. Jean Laborde Barbanegre",
+        "MFr": "Dr. Benoit Say-Liang-Fat",
+        "RMr": "Dr. Benoit Say-Liang-Fat",
+        "RMe": "Etudiant non Thèsé",
+        "MFe": "Etudiant non Thèsé"
       };
 
       // Map RDV

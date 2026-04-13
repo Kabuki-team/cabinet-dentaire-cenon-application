@@ -69,19 +69,27 @@ export function Revenues() {
       if (pRes.length > 0) {
         const mapNames: Record<string, string> = { 
           "RM": "Dr. Réda Mechouk",
-          "RMe": "Dr. RMe (Dr Réda Mechouk externe ?)",
-          "RMr": "Dr. RMr (Dr Réda Mechouk remplaçant ?)"
+          "MF": "Dr. Medy Fakreldin",
+          "HG": "Dr. Hamza Gafsi",
+          "JL": "Dr. Jean Laborde Barbanegre",
+          "MFr": "Dr. Benoit Say-Liang-Fat",
+          "RMr": "Dr. Benoit Say-Liang-Fat",
+          "RMe": "Etudiant non Thèsé",
+          "MFe": "Etudiant non Thèsé"
         };
-        setDataPraticiens(pRes[0].values.map(v => {
+        const agg: Record<string, number> = {};
+        pRes[0].values.forEach(v => {
           let nameStr = String(v[0]);
           if (mapNames[nameStr]) nameStr = mapNames[nameStr];
           else if (nameStr && nameStr !== 'NC' && nameStr !== 'null') nameStr = `Dr. ${nameStr.replace('Dr. ', '').replace('Docteur ', '')}`;
           else nameStr = 'Cabinet';
-          return {
-            name: nameStr,
-            revenus: Number(v[1]) || 0
-          };
-        }));
+          agg[nameStr] = (agg[nameStr] || 0) + (Number(v[1]) || 0);
+        });
+
+        setDataPraticiens(Object.entries(agg).map(([name, revenus]) => ({
+          name,
+          revenus
+        })).sort((a: any, b: any) => b.revenus - a.revenus));
       } else {
         setDataPraticiens([]);
       }

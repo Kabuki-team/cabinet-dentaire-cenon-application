@@ -33,12 +33,31 @@ export function DateRangePicker({ onRangeChange, singleDate, initialDate }: Date
     };
 
     fetchActiveDates();
-    const interval = setInterval(fetchActiveDates, 2000);
+    const interval = setInterval(fetchActiveDates, 3000);
     return () => clearInterval(interval);
   }, []);
 
+  // Sync with prop changes
+  useEffect(() => {
+    if (initialDate) {
+      setStartDate(initialDate);
+      if (singleDate) setEndDate(initialDate);
+      setCurrentMonth(new Date(initialDate.getFullYear(), initialDate.getMonth(), 1));
+    }
+  }, [initialDate]);
+
+  // Ensure current month is visible when opening
+  useEffect(() => {
+    if (isOpen && startDate) {
+      setCurrentMonth(new Date(startDate.getFullYear(), startDate.getMonth(), 1));
+    }
+  }, [isOpen]);
+
   const daysInMonth = (date: Date) => new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
-  const firstDayOfMonth = (date: Date) => new Date(date.getFullYear(), date.getMonth(), 1).getDay();
+  const firstDayOfMonth = (date: Date) => {
+    let d = new Date(date.getFullYear(), date.getMonth(), 1).getDay();
+    return d === 0 ? 6 : d - 1; // Ajustement pour que Lundi soit 0
+  };
 
   const handleDateClick = (day: number) => {
     const clickedDate = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), day);
@@ -169,7 +188,7 @@ export function DateRangePicker({ onRangeChange, singleDate, initialDate }: Date
               <span key={d} style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.5rem' }}>{d}</span>
             ))}
             
-            {Array.from({ length: (firstDayOfMonth(currentMonth) + 6) % 7 }).map((_, i) => (
+            {Array.from({ length: firstDayOfMonth(currentMonth) }).map((_, i) => (
               <div key={`empty-${i}`} />
             ))}
 

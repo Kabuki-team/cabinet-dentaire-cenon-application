@@ -8,16 +8,18 @@ export function Imports() {
   const [activeTab, setActiveTab] = useState<'new' | 'history'>('new');
   const [loading, setLoading] = useState<{ [key: string]: boolean }>({});
   const [status, setStatus] = useState<{ [key: string]: 'success' | 'error' | null }>({});
-  const [previews, setPreviews] = useState<{ doctolib: any[], logosw: any[] }>({ doctolib: [], logosw: [] });
-  const [rawData, setRawData] = useState<{ doctolib: any[], logosw: any[] }>({ doctolib: [], logosw: [] });
+  const [previews, setPreviews] = useState<{ doctolib: any[], logosw: any[], logosw_patients: any[] }>({ doctolib: [], logosw: [], logosw_patients: [] });
+  const [rawData, setRawData] = useState<{ doctolib: any[], logosw: any[], logosw_patients: any[] }>({ doctolib: [], logosw: [], logosw_patients: [] });
   const [stats, setStats] = useState<any>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [progress, setProgress] = useState<string | null>(null);
   const [history, setHistory] = useState<any[]>([]);
   const [selectedAnomalies, setSelectedAnomalies] = useState<any[] | null>(null);
+  const [showResetModal, setShowResetModal] = useState(false);
 
   const doctolibFileRef = useRef<HTMLInputElement>(null);
   const logoswFileRef = useRef<HTMLInputElement>(null);
+  const logoswPatientsRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { loadHistory(); }, []);
 
@@ -38,19 +40,42 @@ export function Imports() {
     if (!dateInput) return "";
     if (dateInput instanceof Date) return dateInput.toISOString().split('T')[0];
     let str = String(dateInput).trim();
-    if (/^\d{1,2}[:h]\d{2}$/.test(str)) return "";
-    if (!isNaN(Number(str)) && str.length >= 5) {
+    if (/^\d{1,2}[:h]\d{2}$/.test(str)) return ""; // Ignore hours if mis-mapped
+
+    // Handle Excel numeric dates (e.g. 44561)
+    if (!isNaN(Number(str)) && str.length >= 5 && !str.includes('/') && !str.includes('-')) {
       const date = new Date((Number(str) - 25569) * 86400 * 1000);
       return date.toISOString().split('T')[0];
     }
+
+    // Split by any common separator
     const parts = str.split(/[\/\-\.]/);
     if (parts.length === 3) {
-      let year = parts[2].split(' ')[0];
-      if (year.length === 2) year = `20${year}`;
-      const month = parts[1].padStart(2, '0');
-      const day = parts[0].padStart(2, '0');
-      return `${year}-${month}-${day}`;
+      let part0 = parts[0].trim();
+      let part1 = parts[1].trim();
+      let part2 = parts[2].trim().split(' ')[0]; // Remove potential time tail
+
+      // Case A: YYYY-MM-DD (ISO)
+      if (part0.length === 4) {
+        return `${part0}-${part1.padStart(2, '0')}-${part2.padStart(2, '0')}`;
+      }
+      
+      // Case B: DD/MM/YYYY or MM/DD/YYYY - we assume DD/MM/YYYY (French default)
+      if (part2.length === 4 || part2.length === 2) {
+        let year = part2;
+        if (year.length === 2) year = `20${year}`;
+        const month = part1.padStart(2, '0');
+        const day = part0.padStart(2, '0');
+        return `${year}-${month}-${day}`;
+      }
     }
+    
+    // Fallback attempt with JS Date parser for remaining cases
+    try {
+      const d = new Date(str);
+      if (!isNaN(d.getTime())) return d.toISOString().split('T')[0];
+    } catch(e) {}
+
     return "";
   };
 
@@ -66,7 +91,7 @@ export function Imports() {
     return foundKey ? row[foundKey] : null;
   };
 
-  const parseFile = (file: File, type: 'doctolib' | 'logosw') => {
+  const parseFile = (file: File, type: 'doctolib' | 'logosw' | 'logosw_patients') => {
     setLoading(prev => ({ ...prev, [type]: true }));
     setErrorMsg(null);
     const reader = new FileReader();
@@ -97,7 +122,7 @@ export function Imports() {
     else reader.readAsBinaryString(file);
   };
 
-  const processPreview = (data: any[], type: 'doctolib' | 'logosw') => {
+  const processPreview = (data: any[], type: 'doctolib' | 'logosw' | 'logosw_patients') => {
     if (data.length === 0) {
       setPreviews(prev => ({ ...prev, [type]: [] }));
       setLoading(prev => ({ ...prev, [type]: false }));
@@ -143,6 +168,12 @@ export function Imports() {
         { label: 'Identifiant Patient', found: hasKey(['doctolib patient id']) },
         { label: 'Nom du patient', found: hasKey(['nom du patient']) },
         { label: 'Prénom du patient', found: hasKey(['prénom du patient']) },
+      ];
+    } else if (type === 'logosw_patients') {
+      validations = [
+        { label: 'Numéro de Dossier', found: hasKey(['numéro', 'numero', 'dossier']) },
+        { label: 'Identité (Nom/Prénom)', found: hasKey(['nom', 'patient', 'identité']) },
+        { label: 'Date de naissance', found: hasKey(['naissance', 'né le', 'nee le']) },
       ];
     } else {
       validations = [
@@ -199,11 +230,11 @@ export function Imports() {
          const prenom = getMappedValue(row, "Prénom du patient") || "";
          const norm = normalizeName(`${nom} ${prenom}`);
 
-         db.run(`INSERT INTO patients (doctolib_id, civilite, nom, prenom, nom_complet_norm, nom_naissance, date_naissance, email, telephone, adresse, code_postal, ville)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         db.run(`INSERT INTO patients (doctolib_id, civilite, nom, prenom, nom_complet_norm, nom_doctolib, nom_naissance, date_naissance, email, telephone, adresse, code_postal, ville)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                  ON CONFLICT(doctolib_id) DO UPDATE SET
-                 nom=excluded.nom, prenom=excluded.prenom, telephone=excluded.telephone, email=excluded.email, adresse=excluded.adresse`,
-                [pIdEx, getMappedValue(row, "Civilité"), nom, prenom, norm, getMappedValue(row, "Nom de naissance"), formatDate(getMappedValue(row, "Date de naissance")), getMappedValue(row, "Email du patient"), getMappedValue(row, "Téléphone portable"), getMappedValue(row, "Adresse"), getMappedValue(row, "Code postal"), getMappedValue(row, "Ville")]);
+                 nom=excluded.nom, prenom=excluded.prenom, nom_complet_norm=excluded.nom_complet_norm, nom_doctolib=excluded.nom_doctolib, nom_naissance=excluded.nom_naissance, date_naissance=excluded.date_naissance, telephone=excluded.telephone, email=excluded.email, adresse=excluded.adresse, civilite=excluded.civilite, code_postal=excluded.code_postal, ville=excluded.ville`,
+                [pIdEx, getMappedValue(row, "Civilité"), nom, prenom, norm, `${nom} ${prenom}`, getMappedValue(row, "Nom de naissance"), formatDate(getMappedValue(row, "Date de naissance")), getMappedValue(row, "Email du patient"), getMappedValue(row, "Téléphone portable"), getMappedValue(row, "Adresse"), getMappedValue(row, "Code postal"), getMappedValue(row, "Ville")]);
 
          const pIdRes = db.exec(`SELECT id FROM patients WHERE doctolib_id = ?`, [pIdEx]);
          const pIdInternal = pIdRes[0]?.values[0][0];
@@ -217,6 +248,26 @@ export function Imports() {
        // 2. LOGOSW
        setProgress("Analyse des flux financiers LogosW...");
        const LOGOSW_BLACKLIST = ['total', 'honoraires', 'reglement', 'réglement', 'règlement', 'logosw', 'grand total'];
+       
+       // Indexation du dictionnaire et sauvegarde persistante
+       const logosLookup = new Map<string, any>();
+       if (rawData.logosw_patients) {
+         db.run("DELETE FROM logosw_dictionary"); // On rafraîchit le dictionnaire à chaque import
+         rawData.logosw_patients.forEach(p => {
+            const nom = getMappedValue(p, "Nom") || getMappedValue(p, "Patient") || "";
+            const prenom = getMappedValue(p, "Prénom") || getMappedValue(p, "Prenom") || "";
+            const n = normalizeName(nom + " " + prenom);
+            logosLookup.set(n, p);
+            const dos = String(getMappedValue(p, "Numéro") || getMappedValue(p, "Numero") || "").trim();
+            if (dos) {
+              logosLookup.set(dos, p);
+              const bDate = formatDate(getMappedValue(p, "Naissance") || getMappedValue(p, "Né le") || getMappedValue(p, "Nee le") || getMappedValue(p, "Date de naissance"));
+              db.run("INSERT OR REPLACE INTO logosw_dictionary (dossier_id, nom, prenom, nom_complet_norm, date_naissance) VALUES (?, ?, ?, ?, ?)",
+                     [dos, nom, prenom, n, bDate]);
+            }
+         });
+       }
+
        for (const row of rawData.logosw) {
          const label = String(getMappedValue(row, "Patient") || "").trim();
          if (!label || LOGOSW_BLACKLIST.some(kw => label.toLowerCase().includes(kw))) continue;
@@ -224,10 +275,102 @@ export function Imports() {
          const norm = normalizeName(label);
          const visitDate = formatDate(getMappedValue(row, "Date"));
          
-         let pIdRes = db.exec(`SELECT id FROM patients WHERE nom_complet_norm = ?`, [norm]);
-         let pId = pIdRes[0]?.values[0][0];
+         const dosId = String(getMappedValue(row, "Dossier") || getMappedValue(row, "Doss") || getMappedValue(row, "N° Dossier") || "").trim();
+         
+         let pId = null;
+
+         // Prio 1 : Recherche par ID Dossier
+         if (dosId) {
+            const res = db.exec(`SELECT id FROM patients WHERE dossier_logosw = ?`, [dosId]);
+            if (res.length > 0) pId = res[0].values[0][0];
+         }
+
+         // Prio 2 : Recherche par nom
          if (!pId) {
-            db.run(`INSERT INTO patients (nom, nom_complet_norm) VALUES (?, ?)`, [label, norm]);
+            // Tentative 1 : Nom complet exact ou Nom LogosW déjà connu ou Nom de naissance + Prénom
+            let pIdRes = db.exec(`
+               SELECT id FROM patients 
+               WHERE nom_complet_norm = ? 
+               OR nom_logosw = ? 
+               OR (LOWER(nom_naissance) || ' ' || LOWER(prenom)) = ?
+               OR (LOWER(prenom) || ' ' || LOWER(nom_naissance)) = ?
+            `, [norm, label, norm, norm]);
+            pId = pIdRes[0]?.values[0][0];
+            
+            if (pId && dosId) {
+               db.run(`UPDATE patients SET dossier_logosw = ? WHERE id = ? AND (dossier_logosw IS NULL OR dossier_logosw = '')`, [dosId, pId]);
+            }
+         }
+
+         if (!pId && logosLookup.size > 0) {
+            // On cherche dans le dictionnaire bridge par Nom OU par ID Dossier (le plus sûr)
+            const dictP = (dosId ? logosLookup.get(dosId) : null) || logosLookup.get(norm);
+            
+            if (dictP) {
+               const bDate = formatDate(getMappedValue(dictP, "Naissance") || getMappedValue(dictP, "Né le") || getMappedValue(dictP, "Nee le"));
+               const dos = String(getMappedValue(dictP, "Numéro") || getMappedValue(dictP, "Numero") || "");
+               const nomLogosBridge = ((getMappedValue(dictP, "Nom") || getMappedValue(dictP, "Patient") || "") + " " + (getMappedValue(dictP, "Prénom") || getMappedValue(dictP, "Prenom") || "")).trim();
+               const normBridge = normalizeName(nomLogosBridge);
+
+               if (bDate && bDate.length > 8) {
+                  const search = db.exec(`SELECT id, nom, prenom FROM patients WHERE date_naissance = ?`, [bDate]);
+                  if (search.length > 0) {
+                     if (search[0].values.length === 1) {
+                        // Match parfait par date (unique)
+                        pId = search[0].values[0][0];
+                     } else {
+                        // Plusieurs suspects avec la même date : on cherche celui qui ressemble le plus au nom LogosW
+                        const bridgeWords = normBridge.split(' ');
+                        let bestMatch = null;
+                        let maxHits = 0;
+                        
+                        search[0].values.forEach((v: any) => {
+                           const dbName = normalizeName(`${v[1]} ${v[2]}`);
+                           const hits = bridgeWords.filter(w => dbName.includes(w)).length;
+                           if (hits > maxHits) {
+                              maxHits = hits;
+                              bestMatch = v[0];
+                           }
+                        });
+                        
+                        if (maxHits >= 1) pId = bestMatch;
+                     }
+                     
+                     if (pId) {
+                        db.run(`UPDATE patients SET nom_logosw = ?, dossier_logosw = ?, has_warning = 1 WHERE id = ?`, [label, dos, pId]);
+                     }
+                  }
+               }
+               
+               // Fallback final : Si pas de date, on cherche par le nom du pont
+               if (!pId && normBridge) {
+                  const search = db.exec(`SELECT id FROM patients WHERE nom_complet_norm = ?`, [normBridge]);
+                  if (search.length > 0) {
+                     pId = search[0].values[0][0];
+                     db.run(`UPDATE patients SET dossier_logosw = ?, nom_logosw = ? WHERE id = ? AND (dossier_logosw IS NULL OR dossier_logosw = '')`, [dos, label, pId]);
+                  }
+               }
+            }
+         }
+
+         if (!pId && visitDate) {
+            const preSearch = normalizeName(label.split(' ').pop() || label);
+            if (preSearch.length > 2) {
+               const appToday = db.exec(`SELECT patient_id FROM appointments WHERE date = ?`, [visitDate]);
+               if (appToday.length > 0 && appToday[0].values.length > 0) {
+                  const ids = appToday[0].values.map((v: any) => v[0]).join(',');
+                  const mRes = db.exec(`SELECT id FROM patients WHERE id IN (${ids}) AND (nom_complet_norm LIKE ? OR prenom LIKE ?)`, 
+                                       [`%${preSearch}%`, `%${label.split(' ').pop()}%`]);
+                  if (mRes.length > 0 && mRes[0].values.length === 1) {
+                     pId = mRes[0].values[0][0];
+                     db.run(`UPDATE patients SET has_warning = 1, nom_logosw = ? WHERE id = ?`, [label, pId]);
+                  }
+               }
+            }
+         }
+
+         if (!pId) {
+            db.run(`INSERT INTO patients (nom, nom_complet_norm, nom_logosw, dossier_logosw) VALUES (?, ?, ?, ?)`, [label, norm, label, dosId]);
             pId = db.exec(`SELECT id FROM patients WHERE nom_complet_norm = ?`, [norm])[0]?.values[0][0];
          }
 
@@ -277,6 +420,74 @@ export function Imports() {
 
          db.run(`INSERT INTO clinical_acts (patient_id, date, libelle, montant_acte, reglement_somme, type, source, logosw_praticien, import_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
                 [pId, visitDate, rawActe, montantActe, reglementSomme, typeAct, "LogosW", logoswPraticien, importId]);
+       }
+       // === PASSE DE RÉCONCILIATION FINALE ===
+       setProgress("Réconciliation finale des identités...");
+       if (rawData.logosw_patients && rawData.logosw_patients.length > 0) {
+          console.group("🔍 Passe de réconciliation finale");
+          let reconciled = 0;
+          
+          for (const p of rawData.logosw_patients) {
+             const dos = String(getMappedValue(p, "Numéro") || getMappedValue(p, "Numero") || "").trim();
+             if (!dos) continue;
+             
+             // Vérifier si ce dossier est déjà lié
+             const already = db.exec(`SELECT id FROM patients WHERE dossier_logosw = ?`, [dos]);
+             if (already.length > 0 && already[0].values.length > 0) continue;
+             
+             const logosNom = String(getMappedValue(p, "Nom") || getMappedValue(p, "Patient") || "").trim();
+             const logosPrenom = String(getMappedValue(p, "Prénom") || getMappedValue(p, "Prenom") || "").trim();
+             const bDateRaw = getMappedValue(p, "Naissance") || getMappedValue(p, "Né le") || getMappedValue(p, "Nee le") || getMappedValue(p, "Date de naissance");
+             const bDate = formatDate(bDateRaw);
+             
+             if (!bDate || bDate.length < 8) {
+                console.warn(`⏭ ${logosNom} ${logosPrenom} (Dossier ${dos}) - Pas de date de naissance exploitable (raw: ${bDateRaw})`);
+                continue;
+             }
+             
+             // Chercher tous les patients avec cette date de naissance
+             const candidates = db.exec(`SELECT id, nom, prenom, nom_naissance, dossier_logosw FROM patients WHERE date_naissance = ?`, [bDate]);
+             
+             if (candidates.length === 0 || candidates[0].values.length === 0) {
+                console.warn(`❌ ${logosNom} ${logosPrenom} (Dossier ${dos}, DDN: ${bDate}) → Aucun patient Doctolib avec cette date`);
+                continue;
+             }
+             
+             const splitW = (t: string) => t.toLowerCase().replace(/[^a-zàâäéèêëïîôùûüÿçœæ\-\s]/g, '').split(/[\s\-]+/).filter(w => w.length > 1);
+             const mScore = (wA: string[], wB: string[]) => {
+               if (!wA.length || !wB.length) return 0;
+               const aInB = wA.filter(wa => wB.some(wb => wb.includes(wa) || wa.includes(wb))).length;
+               const bInA = wB.filter(wb => wA.some(wa => wa.includes(wb) || wb.includes(wa))).length;
+               return Math.round(Math.max(aInB / wA.length, bInA / wB.length) * 100);
+             };
+
+             const logosWords = splitW(`${logosNom} ${logosPrenom}`);
+             let bestId = null;
+             let bestScore = 0;
+             
+             candidates[0].values.forEach((v: any) => {
+                if (v[4] && String(v[4]).trim()) return; // Déjà lié à un dossier
+                
+                const dbWords = splitW(`${v[1] || ''} ${v[2] || ''} ${v[3] || ''}`);
+                const score = mScore(logosWords, dbWords);
+                
+                if (score > bestScore) {
+                   bestScore = score;
+                   bestId = v[0];
+                }
+             });
+             
+             if (bestId && bestScore >= 50) {
+                db.run(`UPDATE patients SET dossier_logosw = ?, nom_logosw = ?, has_warning = 1 WHERE id = ?`, [dos, `${logosNom} ${logosPrenom}`.trim(), bestId]);
+                reconciled++;
+                console.log(`✅ ${logosNom} ${logosPrenom} (Dossier ${dos}) → Lié au patient #${bestId} (score: ${bestScore}%)`);
+             } else {
+                console.warn(`⚠️ ${logosNom} ${logosPrenom} (Dossier ${dos}, DDN: ${bDate}) → ${candidates[0].values.length} candidat(s), meilleur score: ${bestScore}%`);
+             }
+          }
+          
+          console.log(`📊 Réconciliation terminée : ${reconciled} patient(s) nouvellement liés`);
+          console.groupEnd();
        }
 
        db.run("COMMIT");
@@ -353,20 +564,27 @@ export function Imports() {
   };
 
   const clearDB = async () => { 
-    if (confirm("Effacer tout l'historique et les fiches ?")) { 
-       const db = getDB();
-       if (db) {
-          db.run("DELETE FROM patients");
-          db.run("DELETE FROM appointments");
-          db.run("DELETE FROM clinical_acts");
-          db.run("DELETE FROM import_logs");
-          await saveDB(); 
-          setStats(null); 
-          setStatus({}); 
-          setPreviews({ doctolib: [], logosw: [] }); 
-          setHistory([]);
-       }
-    } 
+     const db = getDB();
+     if (db) {
+        try {
+           db.run("DELETE FROM patients");
+           db.run("DELETE FROM appointments");
+           db.run("DELETE FROM clinical_acts");
+           db.run("DELETE FROM import_logs");
+           db.run("DELETE FROM patient_annotations");
+           await saveDB(); 
+           setStats(null); 
+           setStatus({}); 
+           setPreviews({ doctolib: [], logosw: [], logosw_patients: [] }); 
+           setRawData({ doctolib: [], logosw: [], logosw_patients: [] });
+           setHistory([]);
+           setShowResetModal(false);
+           alert("Base de données réinitialisée.");
+        } catch (e) {
+           console.error("Erreur réinitialisation:", e);
+           alert("Erreur lors de la réinitialisation.");
+        }
+     }
   };
 
   const deleteImport = async (importId: string) => {
@@ -403,9 +621,25 @@ export function Imports() {
         <div style={{ display: 'flex', gap: '0.5rem' }}>
           <button className={`btn ${activeTab === 'history' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setActiveTab('history')}><HistoryIcon size={18} /> Historique</button>
           <button className={`btn ${activeTab === 'new' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setActiveTab('new')}><CheckCircle size={18} /> Nouvel Import</button>
-          <button className="btn btn-outline" onClick={clearDB} style={{ color: 'var(--danger-text)', marginLeft: '1rem' }}>Réinitialiser</button>
+          <button className="btn btn-outline" onClick={() => setShowResetModal(true)} style={{ color: 'var(--danger-text)', marginLeft: '1rem' }}>Réinitialiser</button>
         </div>
       </header>
+
+      {showResetModal && (
+        <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+          <div className="card" style={{ maxWidth: '400px', textAlign: 'center', padding: '2rem' }}>
+            <Trash2 size={48} color="var(--danger-text)" style={{ margin: '0 auto 1.5rem' }} />
+            <h2 style={{ marginBottom: '1rem' }}>Réinitialisation totale</h2>
+            <p style={{ color: 'var(--text-muted)', marginBottom: '2rem' }}>
+              Souhaitez-vous vraiment effacer TOUTES les données (patients, rendez-vous, actes et historique) ? Cette action est irréversible.
+            </p>
+            <div style={{ display: 'flex', gap: '1rem' }}>
+              <button className="btn btn-ghost" style={{ flex: 1 }} onClick={() => setShowResetModal(false)}>Annuler</button>
+              <button className="btn btn-primary" style={{ flex: 1, backgroundColor: 'var(--primary)' }} onClick={clearDB}>Tout effacer</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {activeTab === 'history' ? (
         <div className="card">
@@ -449,7 +683,7 @@ export function Imports() {
           
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem' }}>
             <div className="card">
-              <h3 style={{ marginBottom: '1rem' }}>1. Doctolib</h3>
+              <h3 style={{ marginBottom: '1rem' }}>1. Agenda Doctolib</h3>
               <div onClick={() => doctolibFileRef.current?.click()} style={{ border: '2px dashed #cbd5e1', padding: '1.5rem', textAlign: 'center', cursor: 'pointer', borderRadius: '12px' }}>
                 <input type="file" ref={doctolibFileRef} style={{ display: 'none' }} onChange={e => { setStats(null); e.target.files?.[0] && parseFile(e.target.files[0], 'doctolib'); }} />
                 {loading.doctolib ? <Loader2 className="animate-spin" /> : <p>Importer Doctolib</p>}
@@ -473,7 +707,7 @@ export function Imports() {
             </div>
 
             <div className="card">
-              <h3 style={{ marginBottom: '1rem' }}>2. LogosW</h3>
+              <h3 style={{ marginBottom: '1rem' }}>2. Comptabilité LogosW</h3>
               <div onClick={() => logoswFileRef.current?.click()} style={{ border: '2px dashed #cbd5e1', padding: '1.5rem', textAlign: 'center', cursor: 'pointer', borderRadius: '12px' }}>
                 <input type="file" ref={logoswFileRef} style={{ display: 'none' }} onChange={e => { setStats(null); e.target.files?.[0] && parseFile(e.target.files[0], 'logosw'); }} />
                 {loading.logosw ? <Loader2 className="animate-spin" /> : <p>Importer LogosW</p>}
@@ -495,6 +729,32 @@ export function Imports() {
                 </div>
               )}
             </div>
+          </div>
+
+          <hr style={{ border: 'none', borderTop: '1px solid var(--border)', margin: '0.5rem 0' }} />
+
+          <div className="card" style={{ maxWidth: '600px', alignSelf: 'center', width: '100%' }}>
+            <h3 style={{ marginBottom: '1rem' }}>Mise à jour Base Patients LogosW</h3>
+            <div onClick={() => logoswPatientsRef.current?.click()} style={{ border: '2px dashed #cbd5e1', padding: '1.5rem', textAlign: 'center', cursor: 'pointer', borderRadius: '12px' }}>
+              <input type="file" ref={logoswPatientsRef} style={{ display: 'none' }} onChange={e => { setStats(null); e.target.files?.[0] && parseFile(e.target.files[0], 'logosw_patients'); }} />
+              {loading.logosw_patients ? <Loader2 className="animate-spin" /> : <p>Importer Liste Patients (Dictionnaire de secours)</p>}
+            </div>
+            {previews.logosw_patients.length > 0 && (
+              <div style={{ marginTop: '1rem', padding: '1rem', backgroundColor: '#f8fafc', borderRadius: '12px', fontSize: '0.875rem' }}>
+                 <div style={{ fontWeight: 600, marginBottom: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                   <Eye size={16} /> Structure détectée :
+                 </div>
+                 {previews.logosw_patients.map((col: any, i: number) => (
+                   <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid #e2e8f0' }}>
+                     <span>{col.label}</span>
+                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: col.found ? 'var(--success-text)' : 'var(--danger-text)', fontWeight: 500 }}>
+                       <div style={{ width: 10, height: 10, borderRadius: '50%', backgroundColor: col.found ? 'var(--success-text)' : 'var(--danger-text)' }}></div>
+                       {col.found ? 'Prêt' : 'Manquant'}
+                     </div>
+                   </div>
+                 ))}
+              </div>
+            )}
           </div>
 
           {(status.doctolib === 'success' && status.logosw === 'success' && !stats) && (
@@ -528,16 +788,29 @@ export function Imports() {
                     </p>
                     <div className="table-container" style={{ maxHeight: '400px' }}>
                       <table>
-                        <thead><tr><th>Date du RDV</th><th>Patient concerné</th><th>Praticien (Doctolib)</th><th>Motif Doctolib</th></tr></thead>
+                        <thead><tr><th>Date du RDV</th><th>Patient concerné</th><th>Praticien (Doctolib)</th><th>Motif de l'anomalie</th></tr></thead>
                         <tbody>
-                          {stats.missingList.map((m: any, i: number) => (
-                            <tr key={i}>
-                               <td>{m.date}</td>
-                               <td style={{ fontWeight: 600 }}>{m.nom} {m.prenom}</td>
-                               <td style={{ color: 'var(--primary)', fontWeight: 500 }}>{m.praticien}</td>
-                               <td>{m.motif}</td>
-                            </tr>
-                          ))}
+                          {stats.missingList.map((m: any, i: number) => {
+                             const motifLower = (m.motif || '').toLowerCase();
+                             let hint = "Oubli de facture ou soin non validé.";
+                             if (motifLower.includes('consultation') || motifLower.includes('bilan')) hint = "Consultation sans acte associé (oubli ?)";
+                             else if (motifLower.includes('urgence')) hint = "Urgence reçue sans acte ou traité sans frais.";
+                             else if (motifLower.includes('détartrage') || motifLower.includes('soin')) hint = "Oubli de validation de l'acte de soin.";
+                             else if (motifLower.includes('implant') || motifLower.includes('prothèse')) hint = "Devis/Acompte manquant ou acte non clôturé.";
+                             else if (motifLower.includes('contrôle') || motifLower.includes('suite')) hint = "Rendez-vous de suivi potentiellement non facturable.";
+                             
+                             return (
+                               <tr key={i}>
+                                  <td>{m.date}</td>
+                                  <td style={{ fontWeight: 600 }}>{m.nom} {m.prenom}</td>
+                                  <td style={{ color: 'var(--primary)', fontWeight: 500 }}>{m.praticien}</td>
+                                  <td>
+                                    <span style={{ fontWeight: 600, color: 'var(--danger-text)' }}>{hint}</span>
+                                    {m.motif && <span style={{ display: 'block', fontSize: '0.75rem', opacity: 0.7 }}>RDV initial: {m.motif}</span>}
+                                  </td>
+                               </tr>
+                             );
+                          })}
                         </tbody>
                       </table>
                     </div>
