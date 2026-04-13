@@ -10,9 +10,10 @@ interface DateRangePickerProps {
 
 export function DateRangePicker({ onRangeChange, singleDate, initialDate }: DateRangePickerProps) {
   const [isOpen, setIsOpen] = useState(false);
-  const defaultD = initialDate || new Date(2025, 10, 1);
+  const _now = new Date();
+  const defaultD = initialDate || new Date(_now.getFullYear(), _now.getMonth(), 1);
   const [startDate, setStartDate] = useState<Date | null>(defaultD);
-  const [endDate, setEndDate] = useState<Date | null>(initialDate ? defaultD : new Date(2026, 2, 31));
+  const [endDate, setEndDate] = useState<Date | null>(initialDate ? defaultD : new Date(_now.getFullYear(), _now.getMonth() + 1, 0));
   const [currentMonth, setCurrentMonth] = useState(defaultD);
   const [hoverDate, setHoverDate] = useState<Date | null>(null);
   const [activeDates, setActiveDates] = useState<Set<string>>(new Set());
@@ -33,8 +34,6 @@ export function DateRangePicker({ onRangeChange, singleDate, initialDate }: Date
     };
 
     fetchActiveDates();
-    const interval = setInterval(fetchActiveDates, 3000);
-    return () => clearInterval(interval);
   }, []);
 
   // Sync with prop changes

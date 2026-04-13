@@ -24,6 +24,55 @@ export function PatientDetail() {
   
   const [suggestion, setSuggestion] = useState<any>(null);
 
+  const handleExport = () => {
+    if (!patient) return;
+    const html = `<!DOCTYPE html><html lang="fr"><head>
+      <meta charset="UTF-8"/>
+      <title>Fiche ${patient.name}</title>
+      <style>
+        body { font-family: Arial, sans-serif; padding: 2rem; color: #1a202c; }
+        h1 { font-size: 1.5rem; margin-bottom: 0.25rem; }
+        h2 { font-size: 1rem; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .meta { color: #718096; font-size: 0.875rem; margin-bottom: 2rem; line-height: 1.8; }
+        table { width: 100%; border-collapse: collapse; margin-top: 0.5rem; }
+        th { background: #f7fafc; text-align: left; padding: 0.5rem; font-size: 0.75rem; text-transform: uppercase; border-bottom: 2px solid #edf2f7; }
+        td { padding: 0.5rem; border-bottom: 1px solid #edf2f7; font-size: 0.875rem; }
+        .summary { display: flex; gap: 2rem; margin-bottom: 0.5rem; }
+        .summary span { font-size: 0.875rem; }
+        .summary strong { font-size: 1rem; }
+        @media print { body { padding: 0; } }
+      </style>
+    </head><body>
+      <h1>Fiche Patient — ${patient.name}</h1>
+      <div class="meta">
+        Né(e) le : ${patient.dob} &nbsp;|&nbsp; Tél : ${patient.telephone} &nbsp;|&nbsp; Email : ${patient.email}<br/>
+        Dossier LogosW : ${patient.dossier_logosw || 'Non lié'} &nbsp;|&nbsp; Dernière consultation : ${patient.lastConsult}
+      </div>
+      <h2>Résumé financier</h2>
+      <div class="summary">
+        <span>Total facturé<br/><strong>${patient.total_prod.toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' })}</strong></span>
+        <span>Total encaissé<br/><strong>${patient.total_enc.toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' })}</strong></span>
+        <span>Reste dû<br/><strong>${patient.pending.toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' })}</strong></span>
+      </div>
+      <h2>Historique des actes</h2>
+      <table>
+        <thead><tr><th>Date</th><th>Acte</th><th>Montant</th><th>Réglé</th><th>Source</th></tr></thead>
+        <tbody>
+          ${acts.map((a: any) => `<tr>
+            <td>${a.date || '-'}</td>
+            <td>${a.libelle || '-'}</td>
+            <td>${Number(a.montant_acte || 0).toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' })}</td>
+            <td>${Number(a.reglement_somme || 0).toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' })}</td>
+            <td>${a.source || '-'}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+      <script>window.onload = () => window.print();</script>
+    </body></html>`;
+    const win = window.open('', '_blank');
+    if (win) { win.document.write(html); win.document.close(); }
+  };
+
   useEffect(() => {
     const db = getDB();
     if (!db || !id) return;
@@ -411,7 +460,7 @@ export function PatientDetail() {
           </div>
         </div>
         <div style={{ display: 'flex', gap: '0.75rem' }}>
-          <button className="btn btn-outline"><Download size={18} /> Exporter la fiche</button>
+          <button className="btn btn-outline" onClick={handleExport}><Download size={18} /> Exporter la fiche</button>
         </div>
       </div>
 

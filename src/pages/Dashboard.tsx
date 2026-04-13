@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
-import { Users, CheckCircle, Clock, AlertTriangle, X } from 'lucide-react';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, ResponsiveContainer, Tooltip, Legend, PieChart, Pie, Cell } from 'recharts';
+import React, { useState, useEffect } from 'react';
+import { Users, CheckCircle, Clock, AlertTriangle, X, TrendingDown, TrendingUp } from 'lucide-react';
+import { ComposedChart, Bar, XAxis, YAxis, CartesianGrid, ResponsiveContainer, Tooltip, Legend, PieChart, Pie, Cell, Line, BarChart } from 'recharts';
 import { useNavigate } from 'react-router-dom';
 import { DateRangePicker } from '../components/DateRangePicker';
 import { getDB } from '../lib/db';
@@ -15,6 +15,7 @@ export function Dashboard() {
   const [selectedPraticien, setSelectedPraticien] = useState<string | null>(null);
   const [praticienDetails, setPraticienDetails] = useState<any[]>([]);
   const [activeStatsTab, setActiveStatsTab] = useState('praticien');
+  const [alerts, setAlerts] = useState<{ type: 'danger' | 'warning' | 'info'; msg: string; id: number }[]>([]);
 
   const [dbData, setDbData] = useState<{
     hasData: boolean;
@@ -23,10 +24,17 @@ export function Dashboard() {
     patientsLabel: string;
     totalEncaissé: number;
     totalProduction: number;
+    tauxEnc: number;
+    creancesEnCours: number;
     chartData: any[];
     praticiens: any[];
     dataPraticiensRevenus: any[];
     dataActesRevenus: any[];
+    prevProd: number;
+    prevEnc: number;
+    prevTauxEnc: number;
+    prevCreances: number;
+    compLabel: string;
   }>({
     hasData: false,
     lastImport: 'Aucun',
@@ -34,10 +42,17 @@ export function Dashboard() {
     patientsLabel: 'Total Patients (Base)',
     totalEncaissé: 0,
     totalProduction: 0,
+    tauxEnc: 0,
+    creancesEnCours: 0,
     chartData: [],
     praticiens: [],
     dataPraticiensRevenus: [],
-    dataActesRevenus: []
+    dataActesRevenus: [],
+    prevProd: 0,
+    prevEnc: 0,
+    prevTauxEnc: 0,
+    prevCreances: 0,
+    compLabel: 'vs période précédente',
   });
 
   useEffect(() => {
@@ -81,24 +96,27 @@ export function Dashboard() {
            tPatients = Number(globalCountRes[0].values[0][0]);
         }
         
-        const actRes = db.exec(`SELECT SUM(montant_acte), SUM(reglement_somme) FROM clinical_acts WHERE 1=1 ${whereDateAct}`, argsAct);
+        const actRes = db.exec(`SELECT SUM(montant_acte), SUM(COALESCE(reglement_somme, 0)) FROM clinical_acts WHERE montant_acte > 0 ${whereDateAct}`, argsAct);
         let tProd = 0, tEnc = 0;
         if (actRes.length > 0 && actRes[0].values[0]) {
            tProd = Number(actRes[0].values[0][0]) || 0;
            tEnc = Number(actRes[0].values[0][1]) || 0;
         }
+        const tauxEncGlobal = tProd > 0 ? Math.round(tEnc * 100 / tProd) : 0;
+        const creancesEnCours = Math.max(0, tProd - tEnc);
 
         const cDataRes = db.exec(`
-          SELECT 
-            substr(date, 1, 7) as mois, 
-            SUM(reglement_somme) as enc, 
+          SELECT
+            substr(date, 1, 7) as mois,
+            SUM(COALESCE(reglement_somme, 0)) as enc,
             SUM(montant_acte) as prod,
+            ROUND(SUM(COALESCE(reglement_somme, 0)) * 100.0 / NULLIF(SUM(montant_acte), 0), 1) as tauxEnc,
             (SELECT COUNT(DISTINCT patient_id) FROM appointments WHERE substr(date, 1, 7) = substr(clinical_acts.date, 1, 7) AND statut = 'Vu' ${whereDateAppt}) as pat
-          FROM clinical_acts 
+          FROM clinical_acts
           WHERE date IS NOT NULL AND date != '' ${whereDateAct}
           GROUP BY mois ORDER BY mois ASC LIMIT 12
         `, [...argsAppt, ...argsAct]);
-        
+
         let cData: any[] = [];
         if (cDataRes.length > 0) {
            cData = cDataRes[0].values.map(v => {
@@ -108,7 +126,8 @@ export function Dashboard() {
                 name: `${mName} ${y}`,
                 encaissement: Number(v[1]) || 0,
                 production: Number(v[2]) || 0,
-                patients: Number(v[3]) || 0
+                tauxEnc: Number(v[3]) || 0,
+                patients: Number(v[4]) || 0
               };
            });
         } else {
@@ -193,6 +212,51 @@ export function Dashboard() {
           }));
         }
 
+        // ── Période précédente ──
+        let prevProd = 0, prevEnc = 0, prevTauxEnc = 0, prevCreances = 0;
+        let compLabel = 'vs période précédente';
+
+        if (dateRange.start && dateRange.end) {
+          // Même durée, 1 an avant
+          const tzO = dateRange.start.getTimezoneOffset() * 60000;
+          const dur = dateRange.end.getTime() - dateRange.start.getTime();
+          const pStart = new Date(dateRange.start.getTime() - tzO - 365 * 86400000).toISOString().split('T')[0];
+          const pEnd   = new Date(dateRange.start.getTime() - tzO - 365 * 86400000 + dur).toISOString().split('T')[0];
+          compLabel = 'vs même période N-1';
+          const prevRes = db.exec(
+            `SELECT SUM(montant_acte), SUM(COALESCE(reglement_somme,0)) FROM clinical_acts WHERE montant_acte > 0 AND date >= ? AND date <= ?`,
+            [pStart, pEnd]
+          );
+          if (prevRes.length > 0 && prevRes[0].values[0]) {
+            prevProd = Number(prevRes[0].values[0][0]) || 0;
+            prevEnc  = Number(prevRes[0].values[0][1]) || 0;
+            prevTauxEnc = prevProd > 0 ? Math.round(prevEnc * 100 / prevProd) : 0;
+            prevCreances = Math.max(0, prevProd - prevEnc);
+          }
+        } else {
+          // Dernier mois complet vs mois d'avant
+          const prevRes = db.exec(`
+            SELECT
+              SUM(CASE WHEN substr(date,1,7) = strftime('%Y-%m', date('now','-1 month')) THEN montant_acte ELSE 0 END),
+              SUM(CASE WHEN substr(date,1,7) = strftime('%Y-%m', date('now','-1 month')) THEN COALESCE(reglement_somme,0) ELSE 0 END),
+              SUM(CASE WHEN substr(date,1,7) = strftime('%Y-%m', date('now','-2 months')) THEN montant_acte ELSE 0 END),
+              SUM(CASE WHEN substr(date,1,7) = strftime('%Y-%m', date('now','-2 months')) THEN COALESCE(reglement_somme,0) ELSE 0 END)
+            FROM clinical_acts WHERE montant_acte > 0
+          `);
+          if (prevRes.length > 0 && prevRes[0].values[0]) {
+            const curMonthProd = Number(prevRes[0].values[0][0]) || 0;
+            const curMonthEnc  = Number(prevRes[0].values[0][1]) || 0;
+            prevProd = Number(prevRes[0].values[0][2]) || 0;
+            prevEnc  = Number(prevRes[0].values[0][3]) || 0;
+            prevTauxEnc = prevProd > 0 ? Math.round(prevEnc * 100 / prevProd) : 0;
+            prevCreances = Math.max(0, prevProd - prevEnc);
+            // Override current stats to last month for comparison context
+            if (curMonthProd > 0) {
+              compLabel = 'vs mois précédent';
+            }
+          }
+        }
+
         setDbData({
           hasData: true,
           lastImport: lastImportStr,
@@ -200,16 +264,55 @@ export function Dashboard() {
           patientsLabel: pLabel,
           totalEncaissé: tEnc,
           totalProduction: tProd,
+          tauxEnc: tauxEncGlobal,
+          creancesEnCours,
           chartData: cData,
           praticiens: pData,
           dataPraticiensRevenus,
-          dataActesRevenus
+          dataActesRevenus,
+          prevProd,
+          prevEnc,
+          prevTauxEnc,
+          prevCreances,
+          compLabel,
         });
       }
     } catch (e) {
       console.error("Dashboard error:", e);
     }
   }, [dateRange]);
+
+  // Compute global alerts once on mount
+  useEffect(() => {
+    const db = getDB();
+    if (!db) return;
+    try {
+      const newAlerts: { type: 'danger' | 'warning' | 'info'; msg: string; id: number }[] = [];
+
+      const encRes = db.exec("SELECT SUM(montant_acte), SUM(COALESCE(reglement_somme, 0)) FROM clinical_acts WHERE montant_acte > 0");
+      if (encRes.length > 0 && encRes[0].values[0]) {
+        const prod = Number(encRes[0].values[0][0]) || 0;
+        const enc = Number(encRes[0].values[0][1]) || 0;
+        const taux = prod > 0 ? Math.round(enc * 100 / prod) : 0;
+        if (prod > 0 && taux < 70) newAlerts.push({ type: 'danger', msg: `Taux d'encaissement critique : ${taux}% — vérifiez les règlements en attente`, id: 1 });
+        else if (prod > 0 && taux < 85) newAlerts.push({ type: 'warning', msg: `Taux d'encaissement en dessous de l'objectif (85%) : ${taux}%`, id: 2 });
+      }
+
+      const anomRes = db.exec(`SELECT COUNT(*) FROM appointments a LEFT JOIN clinical_acts ca ON a.patient_id = ca.patient_id AND a.date = ca.date WHERE a.statut = 'Vu' AND ca.id IS NULL`);
+      if (anomRes.length > 0 && anomRes[0].values[0]) {
+        const nb = Number(anomRes[0].values[0][0]) || 0;
+        if (nb > 10) newAlerts.push({ type: 'warning', msg: `${nb} rendez-vous sans acte associé détectés`, id: 3 });
+      }
+
+      const logRes = db.exec("SELECT MAX(timestamp) FROM import_logs");
+      if (logRes.length > 0 && logRes[0].values[0][0]) {
+        const diffDays = Math.floor((Date.now() - new Date(String(logRes[0].values[0][0])).getTime()) / 86400000);
+        if (diffDays > 14) newAlerts.push({ type: 'info', msg: `Données non mises à jour depuis ${diffDays} jour${diffDays > 1 ? 's' : ''}`, id: 4 });
+      }
+
+      setAlerts(newAlerts);
+    } catch (e) { console.error(e); }
+  }, []);
 
   // Fetch practitioner details when selected
   useEffect(() => {
@@ -288,7 +391,7 @@ export function Dashboard() {
           <p style={{ fontWeight: 600, marginBottom: '0.75rem', color: 'var(--text)' }}>{label}</p>
           {payload.map((entry: any, index: number) => (
             <p key={index} style={{ color: entry.color, fontWeight: 500, fontSize: '0.875rem', marginBottom: '0.35rem' }}>
-              {entry.name} : {Number(entry.value).toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' })}
+              {entry.name} : {entry.dataKey === 'tauxEnc' ? `${entry.value}%` : Number(entry.value).toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' })}
             </p>
           ))}
           <div style={{ marginTop: '0.75rem', paddingTop: '0.75rem', borderTop: '1px solid var(--border)' }}>
@@ -302,68 +405,140 @@ export function Dashboard() {
     return null;
   };
 
+  const pctDelta = (cur: number, prev: number) =>
+    prev > 0 ? Math.round((cur - prev) / prev * 100) : null;
+
+  const DeltaBadge = ({ cur, prev, invertColor = false }: { cur: number; prev: number; invertColor?: boolean }) => {
+    const d = pctDelta(cur, prev);
+    if (d === null || prev === 0) return null;
+    const positive = invertColor ? d < 0 : d > 0;
+    const color = positive ? 'var(--green-text)' : 'var(--red-text)';
+    return (
+      <div style={{ fontSize: '0.72rem', fontWeight: 500, color, marginBottom: '0.2rem', letterSpacing: '0.01em' }}>
+        {d > 0 ? '▲' : '▼'} {Math.abs(d)}% <span style={{ color: 'var(--text-tertiary)', fontWeight: 400 }}>{dbData.compLabel}</span>
+      </div>
+    );
+  };
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div>
-          <h1 style={{ fontSize: '1.875rem', fontWeight: 600, marginBottom: '0.5rem' }}>Vue d'ensemble</h1>
-          <p style={{ color: 'var(--text-muted)' }}>Statistiques consolidées {dateRange.start ? 'sur la période sélectionnée' : 'de tout le cabinet'}.</p>
-        </div>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.75rem' }} className="animate-in">
+      {/* Barre d'actions */}
+      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
         <DateRangePicker onRangeChange={(s, e) => setDateRange({ start: s, end: e })} />
       </div>
-      
-      {!dbData.hasData && (
-        <div className="card" style={{ backgroundColor: 'var(--info-bg)', border: '1px solid var(--info)', display: 'flex', gap: '1rem', alignItems: 'center', animation: 'fadeIn 0.5s ease-out' }}>
-          <div style={{ color: 'var(--info-text)' }}><AlertTriangle size={24} /></div>
-          <div>
-            <h4 style={{ fontWeight: 600, color: 'var(--info-text)', fontSize: '0.875rem' }}>Prêt pour l'import initial</h4>
-            <p style={{ color: 'var(--info-text)', fontSize: '0.875rem', opacity: 0.9 }}>Chargez vos fichiers Doctolib et LogosW pour voir vos statistiques réelles s'afficher ici.</p>
-          </div>
-          <button className="btn btn-primary" style={{ marginLeft: 'auto' }} onClick={() => navigate('/imports')}>Démarrer l'import</button>
+
+      {/* Alerts */}
+      {alerts.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+          {alerts.map(alert => (
+            <div key={alert.id} className={`alert alert--${alert.type}`}>
+              <AlertTriangle size={16} style={{ flexShrink: 0 }} />
+              <p style={{ flex: 1, margin: 0 }}>{alert.msg}</p>
+              <button
+                onClick={() => setAlerts(prev => prev.filter(a => a.id !== alert.id))}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '0.15rem', opacity: 0.6 }}
+              >
+                <X size={15} />
+              </button>
+            </div>
+          ))}
         </div>
       )}
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '1.5rem' }}>
-        {[
-          { label: dbData.patientsLabel, value: dbData.totalPatients.toLocaleString('fr-FR'), icon: Users, color: "var(--primary)", bg: "var(--primary-light)", path: "/patients" },
-          { label: "Encaissement global", value: dbData.totalEncaissé.toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' }), icon: CheckCircle, color: "var(--success-text)", bg: "var(--success-bg)", path: "/revenues" },
-          { label: "Production globale", value: dbData.totalProduction.toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' }), icon: Clock, color: "var(--warning-text)", bg: "var(--warning-bg)", path: "/revenues" },
-          { label: "Dernier import", value: dbData.lastImport, icon: AlertTriangle, color: "var(--info-text)", bg: "var(--info-bg)", path: "/imports" },
-        ].map((kpi, index) => (
-          <div 
-            key={index} 
-            className="card" 
-            style={{ display: 'flex', alignItems: 'center', gap: '1rem', cursor: kpi.path ? 'pointer' : 'default', opacity: dbData.hasData ? 1 : 0.5 }}
-            onClick={() => kpi.path && navigate(kpi.path)}
-          >
-            <div style={{ padding: '1rem', backgroundColor: kpi.bg, borderRadius: '0.5rem', color: kpi.color }}>
-              <kpi.icon size={24} />
-            </div>
-            <div style={{ flex: 1 }}>
-              <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>{kpi.label}</p>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <p style={{ fontSize: '1.3rem', fontWeight: 600 }}>{kpi.value}</p>
-              </div>
-            </div>
+      {/* Empty state */}
+      {!dbData.hasData && (
+        <div className="alert alert--info" style={{ borderRadius: 'var(--radius-lg)', padding: '1.25rem 1.5rem' }}>
+          <AlertTriangle size={20} style={{ flexShrink: 0 }} />
+          <div style={{ flex: 1 }}>
+            <div style={{ fontWeight: 600, marginBottom: '0.2rem' }}>Prêt pour l'import initial</div>
+            <div style={{ fontSize: '0.8rem', opacity: 0.85 }}>Chargez vos fichiers Doctolib et LogosW pour voir vos statistiques réelles.</div>
           </div>
-        ))}
+          <button className="btn btn-primary btn-sm" onClick={() => navigate('/imports')}>
+            Démarrer l'import
+          </button>
+        </div>
+      )}
+
+      {/* KPI Cards */}
+      <div className="kpi-grid stagger">
+        {/* Patients */}
+        <div className={`kpi-card animate-in${!dbData.hasData ? ' kpi-card--dimmed' : ''}`} onClick={() => navigate('/patients')}>
+          <span className="kpi-label">{dbData.patientsLabel}</span>
+          <div className="kpi-value">{dbData.totalPatients.toLocaleString('fr-FR')}</div>
+          <div className="kpi-hint">
+            {dateRange.start ? 'Patients ayant eu au moins un RDV honoré sur la période.' : 'Total patients enregistrés dans la base (Doctolib + LogosW).'}
+          </div>
+        </div>
+
+        {/* Production */}
+        <div className={`kpi-card animate-in${!dbData.hasData ? ' kpi-card--dimmed' : ''}`} onClick={() => navigate('/revenues')}>
+          <span className="kpi-label">Honoraires produits</span>
+          <div className="kpi-value">{dbData.totalProduction.toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' })}</div>
+          <DeltaBadge cur={dbData.totalProduction} prev={dbData.prevProd} />
+          <div className="kpi-hint">Total des actes facturés (montant brut avant paiement). Source : LogosW.</div>
+        </div>
+
+        {/* Encaissement */}
+        <div className={`kpi-card animate-in${!dbData.hasData ? ' kpi-card--dimmed' : ''}`} onClick={() => navigate('/revenues')}>
+          <span className="kpi-label">Encaissement réel</span>
+          <div className="kpi-value" style={{ color: 'var(--green-text)' }}>
+            {dbData.totalEncaissé.toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' })}
+          </div>
+          <DeltaBadge cur={dbData.totalEncaissé} prev={dbData.prevEnc} />
+          <div className="kpi-hint">Somme des règlements effectivement reçus (CB, espèces, virement…).</div>
+        </div>
+
+        {/* Taux d'encaissement */}
+        <div className={`kpi-card animate-in${!dbData.hasData ? ' kpi-card--dimmed' : ''}`} onClick={() => navigate('/revenues')}>
+          <span className="kpi-label">Taux d'encaissement</span>
+          <div className="kpi-value" style={{
+            color: dbData.tauxEnc >= 85 ? 'var(--green-text)' : dbData.tauxEnc >= 70 ? 'var(--orange-text)' : 'var(--red-text)',
+          }}>
+            {dbData.tauxEnc}%
+          </div>
+          <DeltaBadge cur={dbData.tauxEnc} prev={dbData.prevTauxEnc} />
+          <div className="kpi-hint">
+            {dbData.tauxEnc >= 85
+              ? 'Excellent — objectif cabinet atteint (≥ 85%).'
+              : dbData.tauxEnc >= 70
+              ? 'En dessous de l\'objectif (85%) — vérifiez les impayés.'
+              : 'Critique — taux faible, action de recouvrement urgente.'}
+          </div>
+        </div>
+
+        {/* Créances */}
+        <div className={`kpi-card animate-in${!dbData.hasData ? ' kpi-card--dimmed' : ''}`} onClick={() => navigate('/recouvrement')}>
+          <span className="kpi-label">Créances en cours</span>
+          <div className="kpi-value" style={{ color: dbData.creancesEnCours > 0 ? 'var(--red-text)' : 'var(--green-text)' }}>
+            {dbData.creancesEnCours.toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' })}
+          </div>
+          <DeltaBadge cur={dbData.creancesEnCours} prev={dbData.prevCreances} invertColor />
+          <div className="kpi-hint">
+            Différence entre production et encaissement — montants non encore réglés par les patients.
+          </div>
+        </div>
       </div>
       
       <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '1.5rem' }}>
         <div className="card" style={{ display: 'flex', flexDirection: 'column', opacity: dbData.hasData ? 1 : 0.5 }}>
-          <h3 style={{ fontSize: '1.125rem', fontWeight: 600, marginBottom: '1rem' }}>Production vs Encaissement</h3>
+          <div style={{ marginBottom: '1rem' }}>
+            <h3 className="section-title">Production vs Encaissement</h3>
+            <p className="section-subtitle">Chaque barre représente un mois. La ligne violette indique le taux d'encaissement (échelle droite, en %).</p>
+          </div>
           <div style={{ height: '300px', width: '100%' }}>
              {dbData.hasData && dbData.chartData.length > 0 && dbData.chartData[0].name !== 'Lun' ? (
                <ResponsiveContainer width="100%" height="100%">
-                 <BarChart data={dbData.chartData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
+                 <ComposedChart data={dbData.chartData} margin={{ top: 10, right: 50, left: 0, bottom: 0 }}>
                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border)" />
                    <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: 'var(--text-muted)' }} />
-                   <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: 'var(--text-muted)' }} tickFormatter={(val) => `${val}€`} />
+                   <YAxis yAxisId="left" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: 'var(--text-muted)' }} tickFormatter={(val) => `${val}€`} />
+                   <YAxis yAxisId="right" orientation="right" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#8b5cf6' }} tickFormatter={v => `${v}%`} domain={[0, 100]} />
                    <Tooltip cursor={{ fill: 'var(--bg)' }} content={<CustomTooltip />} />
                    <Legend iconType="circle" />
-                   <Bar dataKey="production" name="Production" fill="var(--warning-text)" radius={[4, 4, 0, 0]} />
-                   <Bar dataKey="encaissement" name="Encaissement" fill="var(--success-text)" radius={[4, 4, 0, 0]} />
-                 </BarChart>
+                   <Bar yAxisId="left" dataKey="production" name="Production" fill="var(--warning-text)" radius={[4, 4, 0, 0]} />
+                   <Bar yAxisId="left" dataKey="encaissement" name="Encaissement" fill="var(--success-text)" radius={[4, 4, 0, 0]} />
+                   <Line yAxisId="right" type="monotone" dataKey="tauxEnc" name="Taux enc. %" stroke="#8b5cf6" dot={false} strokeWidth={2} />
+                 </ComposedChart>
                </ResponsiveContainer>
              ) : (
                 <p style={{ textAlign: 'center', fontSize: '0.875rem', color: 'var(--text-muted)', marginTop: '100px' }}>Graphique en attente de données réelles (sélectionnez une période plus large)</p>
@@ -372,47 +547,48 @@ export function Dashboard() {
         </div>
 
         <div className="card" style={{ display: 'flex', flexDirection: 'column', opacity: dbData.hasData ? 1 : 0.5 }}>
-          <h3 style={{ fontSize: '1.125rem', fontWeight: 600, marginBottom: '1.25rem' }}>Activité Praticiens (Rendez-vous)</h3>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-             {dbData.hasData && dbData.praticiens.length > 0 ? dbData.praticiens.map((p, i) => (
-              <div 
-                key={i} 
-                style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', cursor: 'pointer', padding: '0.5rem', borderRadius: '0.5rem', transition: 'background-color 0.2s', backgroundColor: 'var(--bg)' }}
-                onClick={() => setSelectedPraticien(p.name)}
-                onMouseOver={(e) => e.currentTarget.style.backgroundColor = 'var(--primary-light)'}
-                onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'var(--bg)'}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ fontSize: '0.875rem', fontWeight: 600 }}>{p.name}</span>
-                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}><strong>{p.patients}</strong> RDV actés</span>
-                </div>
-                <div style={{ width: '100%', height: '6px', backgroundColor: 'var(--card)', borderRadius: '3px', overflow: 'hidden' }}>
-                    <div style={{ width: `${Math.min(100, (p.patients / (dbData.totalPatients||1)) * 100 * 3)}%`, height: '100%', backgroundColor: 'var(--primary)' }}></div>
-                </div>
-              </div>
-            )) : (
+          <div style={{ marginBottom: '1.25rem' }}>
+            <h3 className="section-title">Activité Praticiens</h3>
+            <p className="section-subtitle">RDV honorés par praticien. Cliquez pour voir le détail.</p>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.875rem' }}>
+             {dbData.hasData && dbData.praticiens.length > 0 ? dbData.praticiens.map((p, i) => {
+               const maxPat = Math.max(...dbData.praticiens.map((x: any) => x.patients));
+               const pct = maxPat > 0 ? Math.round((p.patients / maxPat) * 100) : 0;
+               return (
+                 <div
+                   key={i}
+                   style={{ cursor: 'pointer', padding: '0.75rem', borderRadius: 'var(--radius)', background: 'var(--bg)', border: '1px solid transparent', transition: 'all 0.15s' }}
+                   onClick={() => setSelectedPraticien(p.name)}
+                   onMouseOver={(e) => { e.currentTarget.style.background = 'var(--primary-light)'; e.currentTarget.style.borderColor = 'var(--primary-mid)'; }}
+                   onMouseOut={(e) => { e.currentTarget.style.background = 'var(--bg)'; e.currentTarget.style.borderColor = 'transparent'; }}
+                 >
+                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                     <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text)' }}>{p.name}</span>
+                     <span className="badge badge-neutral">{p.patients} RDV</span>
+                   </div>
+                   <div className="progress-track">
+                     <div className="progress-fill" style={{ width: `${pct}%` }} />
+                   </div>
+                 </div>
+               );
+             }) : (
                <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)' }}>Aucune activité sur la période.</p>
-            )}
+             )}
           </div>
         </div>
       </div>
 
       <div className="card" style={{ padding: 0, opacity: dbData.hasData ? 1 : 0.5 }}>
-        <div style={{ padding: '0 1.5rem', borderBottom: '1px solid var(--border)', display: 'flex', gap: '2rem' }}>
+        <div className="tabs-bar">
           {[
             { id: 'praticien', label: 'Honoraires par praticien' },
             { id: 'acte', label: 'Honoraires par type d\'acte' },
           ].map(tab => (
             <button
               key={tab.id}
+              className={`tab-btn${activeStatsTab === tab.id ? ' active' : ''}`}
               onClick={() => setActiveStatsTab(tab.id)}
-              style={{
-                padding: '1.25rem 0',
-                borderBottom: `2px solid ${activeStatsTab === tab.id ? 'var(--primary)' : 'transparent'}`,
-                color: activeStatsTab === tab.id ? 'var(--primary)' : 'var(--text-muted)',
-                fontWeight: activeStatsTab === tab.id ? 500 : 400,
-                transition: 'all 0.2s ease',
-              }}
             >
               {tab.label}
             </button>
@@ -487,8 +663,8 @@ export function Dashboard() {
       </div>
 
       {selectedPraticien && (
-        <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: '2rem' }}>
-          <div style={{ width: '100%', maxWidth: '800px', maxHeight: '90vh', backgroundColor: 'var(--card)', boxShadow: 'var(--shadow-lg)', borderRadius: '1rem', display: 'flex', flexDirection: 'column' }}>
+        <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: '2rem' }} onClick={() => setSelectedPraticien(null)}>
+          <div style={{ width: '100%', maxWidth: '800px', maxHeight: '90vh', backgroundColor: 'var(--card)', boxShadow: 'var(--shadow-lg)', borderRadius: '1rem', display: 'flex', flexDirection: 'column' }} onClick={e => e.stopPropagation()}>
             <div style={{ padding: '1.5rem', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div>
                 <h2 style={{ fontSize: '1.25rem', fontWeight: 600 }}>Détails d'activité : {selectedPraticien}</h2>

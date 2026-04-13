@@ -4,4 +4,29 @@ import react from '@vitejs/plugin-react'
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
+
+  // Required for Tauri: relative asset paths so the built index.html
+  // works when loaded from tauri://localhost
+  base: './',
+
+  build: {
+    outDir: 'dist',
+    // ES2022 is supported by WebView2 (Chromium 109+) and WebKit 16+
+    target: 'es2022',
+    rollupOptions: {
+      output: {
+        // Keep sql.js in its own chunk — it manages its own WASM loading
+        manualChunks: {
+          'sql-js': ['sql.js'],
+        },
+      },
+    },
+  },
+
+  server: {
+    port: 5173,
+    // Prevent Vite from jumping to 5174 if 5173 is busy (breaks Tauri dev URL)
+    strictPort: true,
+  },
+
 })

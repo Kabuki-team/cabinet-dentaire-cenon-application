@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Loader2, ShieldAlert, Eye, History as HistoryIcon, FileText, CheckCircle, Trash2 } from 'lucide-react';
+import { Loader2, ShieldAlert, Eye, History as HistoryIcon, FileText, CheckCircle, CheckCircle2, XCircle, Trash2, UploadCloud, X, BookOpen, ChevronDown, ChevronRight, ExternalLink } from 'lucide-react';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 import { getDB, saveDB } from '../lib/db';
@@ -18,6 +18,9 @@ export function Imports() {
   const [history, setHistory] = useState<any[]>([]);
   const [selectedAnomalies, setSelectedAnomalies] = useState<any[] | null>(null);
   const [showResetModal, setShowResetModal] = useState(false);
+  const [fileNames, setFileNames] = useState<{ doctolib: string; logosw: string; logosw_patients: string }>({ doctolib: '', logosw: '', logosw_patients: '' });
+  const [dragOver, setDragOver] = useState<{ [key: string]: boolean }>({});
+  const [openGuideSection, setOpenGuideSection] = useState<string | null>(null);
 
   const doctolibFileRef = useRef<HTMLInputElement>(null);
   const logoswFileRef = useRef<HTMLInputElement>(null);
@@ -699,21 +702,15 @@ export function Imports() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div>
-           <h1 style={{ fontSize: '1.875rem', fontWeight: 600 }}>Gestion des Imports</h1>
-           <p style={{ color: 'var(--text-muted)' }}>Analysez et mémorisez vos flux financiers</p>
-        </div>
-        <div style={{ display: 'flex', gap: '0.5rem' }}>
-          <button className={`btn ${activeTab === 'history' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setActiveTab('history')}><HistoryIcon size={18} /> Historique</button>
-          <button className={`btn ${activeTab === 'new' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setActiveTab('new')}><CheckCircle size={18} /> Nouvel Import</button>
-          <button className="btn btn-outline" onClick={() => setShowResetModal(true)} style={{ color: 'var(--danger-text)', marginLeft: '1rem' }}>Réinitialiser</button>
-        </div>
-      </header>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
+        <button className={`btn ${activeTab === 'history' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setActiveTab('history')}><HistoryIcon size={18} /> Historique</button>
+        <button className={`btn ${activeTab === 'new' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setActiveTab('new')}><CheckCircle size={18} /> Nouvel Import</button>
+        <button className="btn btn-outline" onClick={() => setShowResetModal(true)} style={{ color: 'var(--danger-text)', marginLeft: '0.5rem' }}>Réinitialiser</button>
+      </div>
 
       {showResetModal && (
-        <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
-          <div className="card" style={{ maxWidth: '400px', textAlign: 'center', padding: '2rem' }}>
+        <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }} onClick={() => setShowResetModal(false)}>
+          <div className="card" style={{ maxWidth: '400px', textAlign: 'center', padding: '2rem' }} onClick={e => e.stopPropagation()}>
             <Trash2 size={48} color="var(--danger-text)" style={{ margin: '0 auto 1.5rem' }} />
             <h2 style={{ marginBottom: '1rem' }}>Réinitialisation totale</h2>
             <p style={{ color: 'var(--text-muted)', marginBottom: '2rem' }}>
@@ -765,88 +762,348 @@ export function Imports() {
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-          {errorMsg && <div className="card" style={{ backgroundColor: 'var(--danger-bg)', color: 'var(--danger-text)', display: 'flex', gap: '1rem', alignItems: 'center' }}><ShieldAlert /> {errorMsg}</div>}
-          
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem' }}>
-            <div className="card">
-              <h3 style={{ marginBottom: '1rem' }}>1. Agenda Doctolib</h3>
-              <div onClick={() => doctolibFileRef.current?.click()} style={{ border: '2px dashed #cbd5e1', padding: '1.5rem', textAlign: 'center', cursor: 'pointer', borderRadius: '12px' }}>
-                <input type="file" ref={doctolibFileRef} style={{ display: 'none' }} onChange={e => { setStats(null); e.target.files?.[0] && parseFile(e.target.files[0], 'doctolib'); }} />
-                {loading.doctolib ? <Loader2 className="animate-spin" /> : <p>Importer Doctolib</p>}
-              </div>
-              {previews.doctolib.length > 0 && (
-                <div style={{ marginTop: '1rem', padding: '1rem', backgroundColor: '#f8fafc', borderRadius: '12px', fontSize: '0.875rem' }}>
-                   <div style={{ fontWeight: 600, marginBottom: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                     <Eye size={16} /> Structure détectée :
-                   </div>
-                   {previews.doctolib.map((col: any, i: number) => (
-                     <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid #e2e8f0' }}>
-                       <span>{col.label}</span>
-                       <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: col.found ? 'var(--success-text)' : 'var(--danger-text)', fontWeight: 500 }}>
-                         <div style={{ width: 10, height: 10, borderRadius: '50%', backgroundColor: col.found ? 'var(--success-text)' : 'var(--danger-text)' }}></div>
-                         {col.found ? 'Prêt' : 'Manquant'}
-                       </div>
-                     </div>
-                   ))}
-                </div>
-              )}
+          {errorMsg && (
+            <div style={{ backgroundColor: 'var(--danger-bg)', color: 'var(--danger-text)', display: 'flex', gap: '1rem', alignItems: 'center', padding: '1rem 1.25rem', borderRadius: '0.75rem', border: '1px solid var(--danger)', fontSize: '0.875rem' }}>
+              <ShieldAlert size={18} style={{ flexShrink: 0 }} /> {errorMsg}
+              <button onClick={() => setErrorMsg(null)} style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--danger-text)' }}><X size={16} /></button>
             </div>
+          )}
 
-            <div className="card">
-              <h3 style={{ marginBottom: '1rem' }}>2. Comptabilité LogosW</h3>
-              <div onClick={() => logoswFileRef.current?.click()} style={{ border: '2px dashed #cbd5e1', padding: '1.5rem', textAlign: 'center', cursor: 'pointer', borderRadius: '12px' }}>
-                <input type="file" ref={logoswFileRef} style={{ display: 'none' }} onChange={e => { setStats(null); e.target.files?.[0] && parseFile(e.target.files[0], 'logosw'); }} />
-                {loading.logosw ? <Loader2 className="animate-spin" /> : <p>Importer LogosW</p>}
-              </div>
-              {previews.logosw.length > 0 && (
-                <div style={{ marginTop: '1rem', padding: '1rem', backgroundColor: '#f8fafc', borderRadius: '12px', fontSize: '0.875rem' }}>
-                   <div style={{ fontWeight: 600, marginBottom: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                     <Eye size={16} /> Structure détectée :
-                   </div>
-                   {previews.logosw.map((col: any, i: number) => (
-                     <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid #e2e8f0' }}>
-                       <span>{col.label}</span>
-                       <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: col.found ? 'var(--success-text)' : 'var(--danger-text)', fontWeight: 500 }}>
-                         <div style={{ width: 10, height: 10, borderRadius: '50%', backgroundColor: col.found ? 'var(--success-text)' : 'var(--danger-text)' }}></div>
-                         {col.found ? 'Prêt' : 'Manquant'}
-                       </div>
-                     </div>
-                   ))}
+          {/* Zone d'upload — 3 colonnes */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '1.25rem' }}>
+            {/* Doctolib */}
+            {(() => {
+              const type = 'doctolib';
+              const allReady = previews[type].length > 0 && previews[type].every((c: any) => c.found);
+              const hasError = previews[type].length > 0 && previews[type].some((c: any) => !c.found);
+              const borderColor = allReady ? 'var(--success)' : hasError ? 'var(--danger)' : dragOver[type] ? 'var(--primary)' : '#cbd5e1';
+              const bgColor = dragOver[type] ? 'var(--primary-light)' : 'transparent';
+              return (
+                <div className="card" style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <div>
+                      <span style={{ fontSize: '0.7rem', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Étape 1</span>
+                      <h3 style={{ fontSize: '1rem', fontWeight: 600, margin: 0 }}>Agenda Doctolib</h3>
+                    </div>
+                    {allReady && <CheckCircle2 size={20} color="var(--success)" />}
+                    {hasError && <XCircle size={20} color="var(--danger)" />}
+                  </div>
+                  <div
+                    onClick={() => doctolibFileRef.current?.click()}
+                    onDragOver={e => { e.preventDefault(); setDragOver(p => ({ ...p, [type]: true })); }}
+                    onDragLeave={() => setDragOver(p => ({ ...p, [type]: false }))}
+                    onDrop={e => { e.preventDefault(); setDragOver(p => ({ ...p, [type]: false })); const f = e.dataTransfer.files[0]; if (f) { setStats(null); setFileNames(p => ({ ...p, [type]: f.name })); parseFile(f, type); } }}
+                    style={{ border: `2px dashed ${borderColor}`, padding: '1.5rem 1rem', textAlign: 'center', cursor: 'pointer', borderRadius: '0.75rem', backgroundColor: bgColor, transition: 'all 0.2s' }}
+                  >
+                    <input type="file" accept=".csv,.xlsx,.xls" ref={doctolibFileRef} style={{ display: 'none' }} onChange={e => { const f = e.target.files?.[0]; if (f) { setStats(null); setFileNames(p => ({ ...p, [type]: f.name })); parseFile(f, type); } }} />
+                    {loading[type] ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.5rem', color: 'var(--primary)' }}>
+                        <Loader2 size={24} className="animate-spin" />
+                        <span style={{ fontSize: '0.8rem' }}>Analyse en cours...</span>
+                      </div>
+                    ) : fileNames[type] ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.25rem' }}>
+                        <FileText size={20} color="var(--primary)" />
+                        <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text)', wordBreak: 'break-all' }}>{fileNames[type]}</span>
+                        <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Cliquer pour changer</span>
+                      </div>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.5rem', color: 'var(--text-muted)' }}>
+                        <UploadCloud size={24} />
+                        <span style={{ fontSize: '0.875rem', fontWeight: 500 }}>Glisser ou cliquer</span>
+                        <span style={{ fontSize: '0.7rem' }}>.csv · .xlsx</span>
+                      </div>
+                    )}
+                  </div>
+                  {previews[type].length > 0 && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                      {previews[type].map((col: any, i: number) => (
+                        <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.8rem' }}>
+                          <span style={{ color: 'var(--text-muted)' }}>{col.label}</span>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', color: col.found ? 'var(--success-text)' : 'var(--danger-text)', fontWeight: 600 }}>
+                            {col.found ? <CheckCircle2 size={14} /> : <XCircle size={14} />}
+                            {col.found ? 'OK' : 'Manquant'}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
+              );
+            })()}
+
+            {/* LogosW */}
+            {(() => {
+              const type = 'logosw';
+              const allReady = previews[type].length > 0 && previews[type].every((c: any) => c.found);
+              const hasError = previews[type].length > 0 && previews[type].some((c: any) => !c.found);
+              const borderColor = allReady ? 'var(--success)' : hasError ? 'var(--danger)' : dragOver[type] ? 'var(--primary)' : '#cbd5e1';
+              const bgColor = dragOver[type] ? 'var(--primary-light)' : 'transparent';
+              return (
+                <div className="card" style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <div>
+                      <span style={{ fontSize: '0.7rem', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Étape 2</span>
+                      <h3 style={{ fontSize: '1rem', fontWeight: 600, margin: 0 }}>Comptabilité LogosW</h3>
+                    </div>
+                    {allReady && <CheckCircle2 size={20} color="var(--success)" />}
+                    {hasError && <XCircle size={20} color="var(--danger)" />}
+                  </div>
+                  <div
+                    onClick={() => logoswFileRef.current?.click()}
+                    onDragOver={e => { e.preventDefault(); setDragOver(p => ({ ...p, [type]: true })); }}
+                    onDragLeave={() => setDragOver(p => ({ ...p, [type]: false }))}
+                    onDrop={e => { e.preventDefault(); setDragOver(p => ({ ...p, [type]: false })); const f = e.dataTransfer.files[0]; if (f) { setStats(null); setFileNames(p => ({ ...p, [type]: f.name })); parseFile(f, type); } }}
+                    style={{ border: `2px dashed ${borderColor}`, padding: '1.5rem 1rem', textAlign: 'center', cursor: 'pointer', borderRadius: '0.75rem', backgroundColor: bgColor, transition: 'all 0.2s' }}
+                  >
+                    <input type="file" accept=".csv,.xlsx,.xls" ref={logoswFileRef} style={{ display: 'none' }} onChange={e => { const f = e.target.files?.[0]; if (f) { setStats(null); setFileNames(p => ({ ...p, [type]: f.name })); parseFile(f, type); } }} />
+                    {loading[type] ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.5rem', color: 'var(--primary)' }}>
+                        <Loader2 size={24} className="animate-spin" />
+                        <span style={{ fontSize: '0.8rem' }}>Analyse en cours...</span>
+                      </div>
+                    ) : fileNames[type] ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.25rem' }}>
+                        <FileText size={20} color="var(--primary)" />
+                        <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text)', wordBreak: 'break-all' }}>{fileNames[type]}</span>
+                        <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Cliquer pour changer</span>
+                      </div>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.5rem', color: 'var(--text-muted)' }}>
+                        <UploadCloud size={24} />
+                        <span style={{ fontSize: '0.875rem', fontWeight: 500 }}>Glisser ou cliquer</span>
+                        <span style={{ fontSize: '0.7rem' }}>.csv · .xlsx</span>
+                      </div>
+                    )}
+                  </div>
+                  {previews[type].length > 0 && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                      {previews[type].map((col: any, i: number) => (
+                        <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.8rem' }}>
+                          <span style={{ color: 'var(--text-muted)' }}>{col.label}</span>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', color: col.found ? 'var(--success-text)' : 'var(--danger-text)', fontWeight: 600 }}>
+                            {col.found ? <CheckCircle2 size={14} /> : <XCircle size={14} />}
+                            {col.found ? 'OK' : 'Manquant'}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
+            {/* LogosW Patients (optionnel) */}
+            {(() => {
+              const type = 'logosw_patients';
+              const allReady = previews[type].length > 0 && previews[type].every((c: any) => c.found);
+              const hasError = previews[type].length > 0 && previews[type].some((c: any) => !c.found);
+              const borderColor = allReady ? 'var(--success)' : hasError ? 'var(--danger)' : dragOver[type] ? 'var(--primary)' : '#cbd5e1';
+              const bgColor = dragOver[type] ? 'var(--primary-light)' : 'transparent';
+              return (
+                <div className="card" style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '1rem', opacity: 0.85 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <span style={{ fontSize: '0.7rem', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Optionnel</span>
+                        <span style={{ fontSize: '0.65rem', backgroundColor: 'var(--accent-light)', color: 'var(--warning-text)', padding: '1px 6px', borderRadius: '4px', fontWeight: 600 }}>Dictionnaire</span>
+                      </div>
+                      <h3 style={{ fontSize: '1rem', fontWeight: 600, margin: 0 }}>Base Patients LogosW</h3>
+                    </div>
+                    {allReady && <CheckCircle2 size={20} color="var(--success)" />}
+                    {hasError && <XCircle size={20} color="var(--danger)" />}
+                  </div>
+                  <div
+                    onClick={() => logoswPatientsRef.current?.click()}
+                    onDragOver={e => { e.preventDefault(); setDragOver(p => ({ ...p, [type]: true })); }}
+                    onDragLeave={() => setDragOver(p => ({ ...p, [type]: false }))}
+                    onDrop={e => { e.preventDefault(); setDragOver(p => ({ ...p, [type]: false })); const f = e.dataTransfer.files[0]; if (f) { setStats(null); setFileNames(p => ({ ...p, [type]: f.name })); parseFile(f, type); } }}
+                    style={{ border: `2px dashed ${borderColor}`, padding: '1.5rem 1rem', textAlign: 'center', cursor: 'pointer', borderRadius: '0.75rem', backgroundColor: bgColor, transition: 'all 0.2s' }}
+                  >
+                    <input type="file" accept=".csv,.xlsx,.xls" ref={logoswPatientsRef} style={{ display: 'none' }} onChange={e => { const f = e.target.files?.[0]; if (f) { setStats(null); setFileNames(p => ({ ...p, [type]: f.name })); parseFile(f, type); } }} />
+                    {loading[type] ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.5rem', color: 'var(--primary)' }}>
+                        <Loader2 size={24} className="animate-spin" />
+                        <span style={{ fontSize: '0.8rem' }}>Analyse en cours...</span>
+                      </div>
+                    ) : fileNames[type] ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.25rem' }}>
+                        <FileText size={20} color="var(--primary)" />
+                        <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text)', wordBreak: 'break-all' }}>{fileNames[type]}</span>
+                        <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Cliquer pour changer</span>
+                      </div>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.5rem', color: 'var(--text-muted)' }}>
+                        <UploadCloud size={24} />
+                        <span style={{ fontSize: '0.875rem', fontWeight: 500 }}>Glisser ou cliquer</span>
+                        <span style={{ fontSize: '0.7rem' }}>.csv · .xlsx — améliore le matching patient</span>
+                      </div>
+                    )}
+                  </div>
+                  {previews[type].length > 0 && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                      {previews[type].map((col: any, i: number) => (
+                        <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.8rem' }}>
+                          <span style={{ color: 'var(--text-muted)' }}>{col.label}</span>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', color: col.found ? 'var(--success-text)' : 'var(--danger-text)', fontWeight: 600 }}>
+                            {col.found ? <CheckCircle2 size={14} /> : <XCircle size={14} />}
+                            {col.found ? 'OK' : 'Manquant'}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
           </div>
 
-          <hr style={{ border: 'none', borderTop: '1px solid var(--border)', margin: '0.5rem 0' }} />
+          {/* Guide d'export */}
+          {(() => {
+            const GUIDE_SECTIONS = [
+              {
+                id: 'doctolib',
+                label: 'Étape 1 — Agenda Doctolib',
+                badge: 'Obligatoire',
+                badgeColor: 'var(--primary)',
+                badgeBg: 'var(--primary-light)',
+                intro: "Exportez l'historique des rendez-vous depuis votre espace pro Doctolib. Un accès administrateur est requis.",
+                steps: [
+                  { text: <>Connectez-vous sur <strong>pro.doctolib.fr</strong></> },
+                  { text: <>Cliquez sur vos <strong>initiales / photo</strong> en haut à droite</> },
+                  { text: <>Allez dans <strong>Paramètres avancés → Données → Exports</strong></> },
+                  { text: <><strong>Type de données</strong> : sélectionnez <em>Historique de RDV</em></> },
+                  { text: <>Choisissez la <strong>période</strong> (ex : mois en cours ou année entière)</> },
+                  { text: <>Cliquez <strong>Exporter le fichier</strong>, saisissez votre mot de passe si demandé</> },
+                  { text: <>Attendez le statut <strong>« Prêt »</strong> puis cliquez sur le nom du fichier pour le télécharger</> },
+                ],
+                note: "Si l'option est grisée, vous n'avez pas les droits d'export. Contactez le support Doctolib en précisant votre statut de praticien administrateur.",
+                link: { label: 'Ouvrir Doctolib Pro', url: 'https://pro.doctolib.fr' },
+              },
+              {
+                id: 'logosw',
+                label: 'Étape 2 — Comptabilité LogosW',
+                badge: 'Obligatoire',
+                badgeColor: 'var(--primary)',
+                badgeBg: 'var(--primary-light)',
+                intro: "Exportez le journal des actes et règlements depuis le module comptabilité de LogosW.",
+                steps: [
+                  { text: <>Ouvrez <strong>LogosW</strong> sur votre poste de travail</> },
+                  { text: <>Dans le menu principal, cliquez sur <strong>Statistiques</strong> ou <strong>Comptabilité</strong></> },
+                  { text: <>Accédez à la section <strong>Exports</strong> ou <strong>Journal de caisse / Relevé d'actes</strong></> },
+                  { text: <>Sélectionnez la <strong>période</strong> souhaitée (mensuelle ou personnalisée)</> },
+                  { text: <>Choisissez le format de sortie : <strong>CSV</strong> ou <strong>Excel (.xlsx)</strong></> },
+                  { text: <>Cliquez sur <strong>Exporter</strong> et sauvegardez le fichier sur votre bureau</> },
+                ],
+                note: "Le fichier doit contenir les colonnes : date, montant_acte, reglement_somme, libelle, praticien. En cas de doute, contactez le support LogosW au 02 99 84 11 44.",
+                link: { label: 'Site LogosW', url: 'https://www.logosw.net' },
+              },
+              {
+                id: 'logosw_patients',
+                label: 'Optionnel — Dictionnaire patients LogosW',
+                badge: 'Recommandé',
+                badgeColor: '#6d28d9',
+                badgeBg: '#ede9fe',
+                intro: "Ce fichier permet à l'outil de croiser automatiquement les dossiers Doctolib et LogosW (même patient, noms légèrement différents). Très utile pour les patients anciens.",
+                steps: [
+                  { text: <>Ouvrez <strong>LogosW</strong> sur votre poste</> },
+                  { text: <>Allez dans <strong>Fichiers → Patients</strong> ou <strong>Liste des dossiers patients</strong></> },
+                  { text: <>Utilisez la fonction <strong>Exporter / Imprimer vers fichier</strong></> },
+                  { text: <>Sélectionnez les champs : <strong>Nom, Prénom, Date de naissance, N° dossier</strong></> },
+                  { text: <>Exportez en <strong>CSV</strong> ou <strong>Excel</strong> et sauvegardez le fichier</> },
+                ],
+                note: "Sans ce fichier, le croisement se fait sur la similarité des noms (moins précis). Avec ce fichier, le taux de matching approche 95–100%.",
+                link: null,
+              },
+            ];
 
-          <div className="card" style={{ maxWidth: '600px', alignSelf: 'center', width: '100%' }}>
-            <h3 style={{ marginBottom: '1rem' }}>Mise à jour Base Patients LogosW</h3>
-            <div onClick={() => logoswPatientsRef.current?.click()} style={{ border: '2px dashed #cbd5e1', padding: '1.5rem', textAlign: 'center', cursor: 'pointer', borderRadius: '12px' }}>
-              <input type="file" ref={logoswPatientsRef} style={{ display: 'none' }} onChange={e => { setStats(null); e.target.files?.[0] && parseFile(e.target.files[0], 'logosw_patients'); }} />
-              {loading.logosw_patients ? <Loader2 className="animate-spin" /> : <p>Importer Liste Patients (Dictionnaire de secours)</p>}
-            </div>
-            {previews.logosw_patients.length > 0 && (
-              <div style={{ marginTop: '1rem', padding: '1rem', backgroundColor: '#f8fafc', borderRadius: '12px', fontSize: '0.875rem' }}>
-                 <div style={{ fontWeight: 600, marginBottom: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                   <Eye size={16} /> Structure détectée :
-                 </div>
-                 {previews.logosw_patients.map((col: any, i: number) => (
-                   <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid #e2e8f0' }}>
-                     <span>{col.label}</span>
-                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: col.found ? 'var(--success-text)' : 'var(--danger-text)', fontWeight: 500 }}>
-                       <div style={{ width: 10, height: 10, borderRadius: '50%', backgroundColor: col.found ? 'var(--success-text)' : 'var(--danger-text)' }}></div>
-                       {col.found ? 'Prêt' : 'Manquant'}
-                     </div>
-                   </div>
-                 ))}
+            return (
+              <div style={{ border: '1px solid var(--border)', borderRadius: '0.75rem', overflow: 'hidden', backgroundColor: 'var(--card)' }}>
+                {/* En-tête guide */}
+                <div style={{ padding: '1rem 1.25rem', borderBottom: openGuideSection !== null ? '1px solid var(--border)' : 'none', backgroundColor: 'var(--bg)', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                  <BookOpen size={18} color="var(--primary)" />
+                  <span style={{ fontWeight: 600, fontSize: '0.9rem', flex: 1 }}>Guide : comment récupérer les fichiers ?</span>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Cliquez sur une section pour l'ouvrir</span>
+                </div>
+
+                {/* Sections accordéon */}
+                <div style={{ display: 'flex', flexDirection: 'column' }}>
+                  {GUIDE_SECTIONS.map((section, idx) => {
+                    const isOpen = openGuideSection === section.id;
+                    return (
+                      <div key={section.id} style={{ borderTop: idx > 0 ? '1px solid var(--border)' : 'none' }}>
+                        {/* Header section */}
+                        <button
+                          onClick={() => setOpenGuideSection(isOpen ? null : section.id)}
+                          style={{
+                            width: '100%', display: 'flex', alignItems: 'center', gap: '0.75rem',
+                            padding: '0.875rem 1.25rem', background: 'none', border: 'none',
+                            cursor: 'pointer', textAlign: 'left',
+                            backgroundColor: isOpen ? 'var(--primary-light)' : 'transparent',
+                            transition: 'background-color 0.15s',
+                          }}
+                        >
+                          {isOpen
+                            ? <ChevronDown size={16} color="var(--primary)" />
+                            : <ChevronRight size={16} color="var(--text-muted)" />}
+                          <span style={{ fontWeight: 600, fontSize: '0.875rem', flex: 1, color: isOpen ? 'var(--primary)' : 'var(--text)' }}>
+                            {section.label}
+                          </span>
+                          <span style={{
+                            fontSize: '0.65rem', fontWeight: 700, padding: '2px 8px', borderRadius: '9999px',
+                            backgroundColor: section.badgeBg, color: section.badgeColor,
+                          }}>{section.badge}</span>
+                        </button>
+
+                        {/* Contenu section */}
+                        {isOpen && (
+                          <div style={{ padding: '1rem 1.5rem 1.25rem', backgroundColor: 'white', borderTop: '1px solid var(--border)' }}>
+                            <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '1rem', lineHeight: 1.6 }}>
+                              {section.intro}
+                            </p>
+                            <ol style={{ margin: 0, paddingLeft: '1.25rem', display: 'flex', flexDirection: 'column', gap: '0.55rem' }}>
+                              {section.steps.map((step, i) => (
+                                <li key={i} style={{ fontSize: '0.85rem', color: 'var(--text)', lineHeight: 1.6 }}>
+                                  {step.text}
+                                </li>
+                              ))}
+                            </ol>
+                            {section.note && (
+                              <div style={{ marginTop: '1rem', padding: '0.6rem 0.85rem', backgroundColor: '#fef9c3', borderLeft: '3px solid #f59e0b', borderRadius: '0 0.375rem 0.375rem 0', fontSize: '0.78rem', color: '#78350f', lineHeight: 1.5 }}>
+                                <strong>Note :</strong> {section.note}
+                              </div>
+                            )}
+                            {section.link && (
+                              <a
+                                href={section.link.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', marginTop: '1rem', fontSize: '0.8rem', color: 'var(--primary)', fontWeight: 600, textDecoration: 'none' }}
+                              >
+                                <ExternalLink size={13} />
+                                {section.link.label}
+                              </a>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
-            )}
-          </div>
+            );
+          })()}
 
           {(status.doctolib === 'success' && status.logosw === 'success' && !stats) && (
-            <div style={{ textAlign: 'center', padding: '1rem' }}>
-              {progress && <p style={{ marginBottom: '1rem', color: 'var(--primary)', fontWeight: 600 }}><Loader2 className="animate-spin" size={16} style={{ display: 'inline', marginRight: '8px' }} /> {progress}</p>}
-              <button className="btn btn-primary btn-lg" onClick={injectToDatabase} disabled={loading.global} style={{ padding: '1rem 3rem' }}>Lancer le Croisement</button>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.75rem', padding: '0.5rem 0' }}>
+              {progress && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', color: 'var(--primary)', fontWeight: 500, fontSize: '0.875rem' }}>
+                  <Loader2 className="animate-spin" size={18} /> {progress}
+                </div>
+              )}
+              <button className="btn btn-primary" onClick={injectToDatabase} disabled={loading.global} style={{ padding: '0.875rem 3rem', fontSize: '1rem', fontWeight: 600 }}>
+                {loading.global ? <><Loader2 className="animate-spin" size={18} /> Traitement en cours...</> : <><CheckCircle size={18} /> Lancer l'import</>}
+              </button>
             </div>
           )}
 
@@ -858,10 +1115,10 @@ export function Imports() {
                </div>
 
                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1rem' }}>
-                  <div className="card"><h4>Vus</h4><p style={{ fontSize: '1.5rem', fontWeight: 700 }}>{stats.totalRDV}</p></div>
-                  <div className="card" style={{ borderLeft: '4px solid green' }}><h4>Honoraires réalisés</h4><p style={{ fontSize: '1.5rem', fontWeight: 700, color: 'green' }}>{stats.production.toLocaleString()} €</p></div>
-                  <div className="card" style={{ borderLeft: '4px solid #3b82f6' }}><h4>Montant encaissé</h4><p style={{ fontSize: '1.5rem', fontWeight: 700, color: '#3b82f6' }}>{stats.encaissement.toLocaleString()} €</p></div>
-                  <div className="card" style={{ borderLeft: '4px solid red' }}><h4>Défauts</h4><p style={{ fontSize: '1.5rem', fontWeight: 700, color: 'red' }}>{stats.missing}</p></div>
+                  <div className="card"><p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.25rem' }}>RDV vus</p><p style={{ fontSize: '1.5rem', fontWeight: 700 }}>{stats.totalRDV}</p></div>
+                  <div className="card" style={{ borderLeft: '4px solid var(--success)' }}><p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.25rem' }}>Honoraires réalisés</p><p style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--success-text)' }}>{Number(stats.production).toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' })}</p></div>
+                  <div className="card" style={{ borderLeft: '4px solid var(--info)' }}><p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.25rem' }}>Montant encaissé</p><p style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--info-text)' }}>{Number(stats.encaissement).toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' })}</p></div>
+                  <div className="card" style={{ borderLeft: '4px solid var(--danger)' }}><p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.25rem' }}>Anomalies</p><p style={{ fontSize: '1.5rem', fontWeight: 700, color: stats.missing > 0 ? 'var(--danger-text)' : 'var(--success-text)' }}>{stats.missing}</p></div>
                </div>
                {stats.missingList.length > 0 && (
                  <div className="card">
@@ -908,8 +1165,8 @@ export function Imports() {
       )}
 
       {selectedAnomalies && (
-        <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: '1rem' }}>
-          <div className="card" style={{ width: '100%', maxWidth: '800px', maxHeight: '90vh', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+        <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: '1rem' }} onClick={() => setSelectedAnomalies(null)}>
+          <div className="card" style={{ width: '100%', maxWidth: '800px', maxHeight: '90vh', display: 'flex', flexDirection: 'column', gap: '1rem' }} onClick={e => e.stopPropagation()}>
              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border)', paddingBottom: '1rem' }}>
                 <h2 style={{ fontSize: '1.25rem', fontWeight: 600, color: 'var(--danger-text)', display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
                   <ShieldAlert /> Détail des anomalies ({selectedAnomalies.length})

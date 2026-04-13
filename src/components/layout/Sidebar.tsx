@@ -1,63 +1,89 @@
-import { NavLink } from 'react-router-dom';
-import { 
-  LayoutDashboard, 
-  Activity, 
-  Users, 
-  TrendingUp, 
-  UploadCloud, 
-  Settings, 
-  Shield 
+import { NavLink, useNavigate } from 'react-router-dom';
+import {
+  LayoutDashboard,
+  Activity,
+  Users,
+  TrendingUp,
+  UploadCloud,
+  AlertCircle,
+  LogOut,
 } from 'lucide-react';
 
-const navItems = [
-  { to: '/', icon: LayoutDashboard, label: 'Vue d\'ensemble' },
-  { to: '/imports', icon: UploadCloud, label: 'Imports' },
-  { to: '/activity', icon: Activity, label: 'Activité quotidienne' },
-  { to: '/patients', icon: Users, label: 'Patients' },
-  { to: '/revenues', icon: TrendingUp, label: 'Revenus & analyses' },
-  { to: '/users', icon: Shield, label: 'Utilisateurs' },
-  { to: '/settings', icon: Settings, label: 'Paramètres' },
+const navSections = [
+  {
+    label: null,
+    items: [
+      { to: '/',         icon: LayoutDashboard, label: 'Vue d\'ensemble',     end: true },
+      { to: '/activity', icon: Activity,        label: 'Activité' },
+      { to: '/patients', icon: Users,           label: 'Patients' },
+    ],
+  },
+  {
+    label: 'Finance',
+    items: [
+      { to: '/revenues',     icon: TrendingUp,  label: 'Revenus' },
+      { to: '/recouvrement', icon: AlertCircle, label: 'Recouvrement' },
+    ],
+  },
+  {
+    label: 'Données',
+    items: [
+      { to: '/imports', icon: UploadCloud, label: 'Imports' },
+    ],
+  },
 ];
 
 export function Sidebar() {
+  const navigate = useNavigate();
+
   return (
     <aside className="sidebar">
-      <div style={{ padding: '1.5rem', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-        <img 
-          src="https://cabinet-dentaire-cenon.fr/assets/logo-1SKykJd2.png" 
-          alt="Cabinet Dentaire Cenon" 
-          style={{ height: '36px', objectFit: 'contain' }} 
-        />
-        <h1 style={{ fontSize: '1.125rem', fontWeight: 600, color: 'var(--text)' }}>Cabinet Cenon</h1>
+      {/* Brand */}
+      <div className="sidebar-brand">
+        <div className="sidebar-logo-wrapper">
+          <img
+            src="https://cabinet-dentaire-cenon.fr/assets/logo-1SKykJd2.png"
+            alt="Cabinet Dentaire Cenon"
+            className="sidebar-logo-image"
+          />
+        </div>
+        <div>
+          <div className="sidebar-brand-name">Cabinet Dentaire Cenon</div>
+          <div className="sidebar-brand-sub">Espace praticien</div>
+        </div>
       </div>
-      
-      <nav style={{ padding: '1rem 0.5rem', display: 'flex', flexDirection: 'column', gap: '0.25rem', flex: 1 }}>
-        {navItems.map((item) => (
-          <NavLink
-            key={item.to}
-            to={item.to}
-            style={({ isActive }) => ({
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.75rem',
-              padding: '0.75rem 1rem',
-              borderRadius: '0.5rem',
-              color: isActive ? 'var(--primary)' : 'var(--text-muted)',
-              backgroundColor: isActive ? 'var(--primary-light)' : 'transparent',
-              fontWeight: isActive ? 500 : 400,
-              textDecoration: 'none',
-              transition: 'all 0.2s'
-            })}
-          >
-            <item.icon size={20} />
-            {item.label}
-          </NavLink>
+
+      {/* Navigation */}
+      <nav className="sidebar-nav">
+        {navSections.map((section, si) => (
+          <div key={si}>
+            {section.label && <div className="sidebar-section-label">{section.label}</div>}
+            {section.items.map((item) => (
+              <NavLink
+                key={item.to}
+                to={item.to}
+                end={item.end}
+                className={({ isActive }) =>
+                  'sidebar-link' + (isActive ? ' active' : '')
+                }
+              >
+                <item.icon size={17} className="sidebar-link-icon" strokeWidth={1.75} />
+                {item.label}
+              </NavLink>
+            ))}
+          </div>
         ))}
       </nav>
-      
-      <div style={{ padding: '1rem', borderTop: '1px solid var(--border)' }}>
-        <button className="btn btn-ghost" style={{ width: '100%', justifyContent: 'flex-start', color: 'var(--text-muted)' }}>
-           Se déconnecter
+
+      {/* Footer */}
+      <div className="sidebar-footer">
+        <button
+          onClick={() => navigate('/login')}
+          className="sidebar-link"
+          style={{ width: '100%', border: 'none', background: 'none', cursor: 'pointer' }}
+        >
+          <LogOut size={16} className="sidebar-link-icon" strokeWidth={1.75} />
+          Se déconnecter
         </button>
       </div>
     </aside>
