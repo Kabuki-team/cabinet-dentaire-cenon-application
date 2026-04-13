@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Users, CheckCircle, Clock, AlertTriangle, X, TrendingDown, TrendingUp } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { AlertTriangle, X } from 'lucide-react';
 import { ComposedChart, Bar, XAxis, YAxis, CartesianGrid, ResponsiveContainer, Tooltip, Legend, PieChart, Pie, Cell, Line, BarChart } from 'recharts';
 import { useNavigate } from 'react-router-dom';
 import { DateRangePicker } from '../components/DateRangePicker';
@@ -245,7 +245,6 @@ export function Dashboard() {
           `);
           if (prevRes.length > 0 && prevRes[0].values[0]) {
             const curMonthProd = Number(prevRes[0].values[0][0]) || 0;
-            const curMonthEnc  = Number(prevRes[0].values[0][1]) || 0;
             prevProd = Number(prevRes[0].values[0][2]) || 0;
             prevEnc  = Number(prevRes[0].values[0][3]) || 0;
             prevTauxEnc = prevProd > 0 ? Math.round(prevEnc * 100 / prevProd) : 0;

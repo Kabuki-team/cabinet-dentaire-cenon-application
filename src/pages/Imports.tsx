@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Loader2, ShieldAlert, Eye, History as HistoryIcon, FileText, CheckCircle, CheckCircle2, XCircle, Trash2, UploadCloud, X, BookOpen, ChevronDown, ChevronRight, ExternalLink } from 'lucide-react';
+import { Loader2, ShieldAlert, History as HistoryIcon, FileText, CheckCircle, CheckCircle2, XCircle, Trash2, UploadCloud, X, BookOpen, ChevronDown, ChevronRight, ExternalLink } from 'lucide-react';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 import { getDB, saveDB } from '../lib/db';
@@ -7,7 +7,6 @@ import { calculateSimilarity } from '../lib/similarity';
 import { toISODate, formatToFrench } from '../lib/dateUtils';
 
 export function Imports() {
-  const [activeTab, setActiveTab] = useState<'new' | 'history'>('new');
   const [loading, setLoading] = useState<{ [key: string]: boolean }>({});
   const [status, setStatus] = useState<{ [key: string]: 'success' | 'error' | null }>({});
   const [previews, setPreviews] = useState<{ doctolib: any[], logosw: any[], logosw_patients: any[] }>({ doctolib: [], logosw: [], logosw_patients: [] });
@@ -202,7 +201,6 @@ export function Imports() {
            // mais la 3e partie ressemble à une année (19xx ou 20xx valide)
            const corruptMatch = rawDate.match(/^(\d{4})-(\d{2})-(\d{4})$/);
            if (corruptMatch) {
-             const p0 = parseInt(corruptMatch[1]); // ex: 2018
              const p2 = parseInt(corruptMatch[3]); // ex: 1995
              // Si la 3e partie est une année plausible (1900-2026) et la 1re dépasse 2026
              // OU si la 3e partie commence par 19xx → c'est inversé
@@ -524,10 +522,6 @@ export function Imports() {
           const totalPatients = db.exec("SELECT COUNT(*) FROM patients");
           console.log(`📊 Patients total: ${totalPatients[0]?.values[0][0]}, avec DDN valide: ${totalWithDob[0]?.values[0][0]}`);
           
-          // Test avec une date connue de LogosW
-          const firstP = rawData.logosw_patients[0];
-          const firstDos = String(getMappedValue(firstP, "Numéro") || getMappedValue(firstP, "Numero") || "").trim();
-          const firstDobRaw = getMappedValue(firstP, "Naissance") || getMappedValue(firstP, "Né le") || getMappedValue(firstP, "Nee le") || getMappedValue(firstP, "Date de naissance");
           let reconciled = 0;
           const stmtSearch = db.prepare("SELECT id, nom, prenom, nom_naissance, dossier_logosw FROM patients WHERE date_naissance = ?");
           const stmtUpdate = db.prepare("UPDATE patients SET dossier_logosw = ?, nom_logosw = ?, has_warning = 0 WHERE id = ?");

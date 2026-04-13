@@ -103,7 +103,6 @@ export function toISODate(dateInput: any): string {
     // FR DD/MM/YYYY or US MM/DD/YYYY
     if (p2.length === 4 || p2.length === 2) {
       const year = p2.length === 2 ? `20${p2}` : p2;
-      const val0 = parseInt(p0);
       const val1 = parseInt(p1);
 
       if (val1 > 12) { // val1 ne peut pas être un mois → c'est un jour → format US MM/DD/YY

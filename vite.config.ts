@@ -16,8 +16,8 @@ export default defineConfig({
     rollupOptions: {
       output: {
         // Keep sql.js in its own chunk — it manages its own WASM loading
-        manualChunks: {
-          'sql-js': ['sql.js'],
+        manualChunks(id) {
+          if (id.includes('sql.js')) return 'sql-js';
         },
       },
     },

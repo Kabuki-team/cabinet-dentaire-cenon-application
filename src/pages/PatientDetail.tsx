@@ -3,7 +3,7 @@ import { ArrowLeft, Download, Calendar, X, ShieldAlert, FileText, CheckCircle2, 
 import { useNavigate, useParams } from 'react-router-dom';
 import { getDB, saveDB } from '../lib/db';
 import { calculateSimilarity } from '../lib/similarity';
-import { formatToFrench, toISODate } from '../lib/dateUtils';
+import { formatToFrench } from '../lib/dateUtils';
 
 export function PatientDetail() {
   const navigate = useNavigate();
@@ -111,7 +111,7 @@ export function PatientDetail() {
           id: v[0],
           dId: v[1] || 'NC',
           name: `${v[3]} ${v[2]}`.trim(),
-          dob: v[4] ? formatToFrench(v[4]) : 'Inconnue',
+          dob: v[4] ? formatToFrench(String(v[4])) : 'Inconnue',
           telephone: v[5] || 'Non renseigné',
           email: v[6] || 'Non renseigné',
           nom_doctolib: v[7],
@@ -240,8 +240,8 @@ export function PatientDetail() {
                         setSuggestion({ type: 'no_dob_match', dob: formatToFrench(dbDate) });
 
                         // TENTATIVE DE FALLBACK PAR NOM (Si la date échoue totalement)
-                        const firstName = v[3]?.split(' ')[0] || "";
-                        const lastName = v[2]?.split(' ')[0] || "";
+                        const firstName = String(v[3] || '').split(' ')[0] || "";
+                        const lastName = String(v[2] || '').split(' ')[0] || "";
                         
                         if (firstName.length > 2 || lastName.length > 2) {
                            const stmt3 = db.prepare("SELECT dossier_id, nom, prenom, date_naissance FROM logosw_dictionary WHERE nom LIKE ? OR prenom LIKE ? OR nom LIKE ?");
@@ -344,7 +344,7 @@ export function PatientDetail() {
     if (!db || !id) return;
     db.run("UPDATE patients SET dossier_logosw = ?, has_warning = 0 WHERE id = ?", [tempID.trim(), id]);
     await saveDB();
-    setPatient(prev => ({ ...prev, dossier_logosw: tempID.trim() }));
+    setPatient((prev: any) => ({ ...prev, dossier_logosw: tempID.trim() }));
     setIsEditingID(false);
     window.location.reload(); 
   };

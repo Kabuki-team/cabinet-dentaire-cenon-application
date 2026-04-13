@@ -75,8 +75,9 @@ export function Login() {
     }
   };
 
-  const checkPin = (pin: string, currentDigits: string[]) => {
+  const checkPin = (pin: string, _currentDigits: string[]) => {
     if (pin === VALID_PIN) {
+      sessionStorage.setItem('authenticated', '1');
       navigate('/');
     } else {
       setError('Code PIN incorrect. Veuillez réessayer.');

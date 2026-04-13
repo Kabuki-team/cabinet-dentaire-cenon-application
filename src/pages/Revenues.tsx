@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, ResponsiveContainer, Legend, PieChart, Pie, Cell, Tooltip, ComposedChart, Line } from 'recharts';
 import { Download } from 'lucide-react';
 import { DateRangePicker } from '../components/DateRangePicker';
@@ -31,7 +31,6 @@ export function Revenues() {
 
     try {
       let whereDateAct = "";
-      let whereDateAppt = "";
       const args: string[] = [];
 
       if (dateRange.start && dateRange.end) {
@@ -41,7 +40,6 @@ export function Revenues() {
          const ed = new Date(dateRange.end.getTime() - tzOffsetEnd).toISOString().split('T')[0];
          
          whereDateAct = " AND c.date >= ? AND c.date <= ?";
-         whereDateAppt = " AND a.date >= ? AND a.date <= ?";
          args.push(sd, ed);
       }
 
@@ -431,7 +429,7 @@ export function Revenues() {
                       <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: 'var(--text-muted)' }} />
                       <YAxis yAxisId="left" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: 'var(--text-muted)' }} tickFormatter={v => `${v.toLocaleString()}€`} />
                       <YAxis yAxisId="right" orientation="right" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#8b5cf6' }} tickFormatter={v => `${v}%`} domain={[0, 100]} />
-                      <Tooltip formatter={(value: any, name: string) => name === 'Taux enc. %' ? `${value}%` : Number(value).toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' })} />
+                      <Tooltip formatter={(value: any, name: any) => name === 'Taux enc. %' ? `${value}%` : Number(value).toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' })} />
                       <Legend iconType="circle" />
                       <Bar yAxisId="left" dataKey="production" name="Production" fill="#f59e0b" radius={[4, 4, 0, 0]} />
                       <Bar yAxisId="left" dataKey="encaissement" name="Encaissement" fill="#14b8a6" radius={[4, 4, 0, 0]} />

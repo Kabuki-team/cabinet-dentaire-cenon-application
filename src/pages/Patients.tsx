@@ -268,7 +268,7 @@ export function Patients() {
                           <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem', flexWrap: 'wrap' }}>
                             <span style={{ fontWeight: 600, fontSize: '0.875rem' }}>{patient.name}</span>
                             {patient.has_warning && (
-                              <ShieldAlert size={13} color="var(--red-text)" title="Incohérence identité Doctolib / LogosW" />
+                              <ShieldAlert size={13} color="var(--red-text)" />
                             )}
                           </div>
                           {patient.risks.length > 0 && (

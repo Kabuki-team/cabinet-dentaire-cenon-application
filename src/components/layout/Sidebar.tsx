@@ -62,7 +62,7 @@ export function Sidebar() {
               <NavLink
                 key={item.to}
                 to={item.to}
-                end={item.end}
+                end={'end' in item ? item.end : undefined}
                 className={({ isActive }) =>
                   'sidebar-link' + (isActive ? ' active' : '')
                 }
@@ -78,7 +78,7 @@ export function Sidebar() {
       {/* Footer */}
       <div className="sidebar-footer">
         <button
-          onClick={() => navigate('/login')}
+          onClick={() => { sessionStorage.removeItem('authenticated'); navigate('/login'); }}
           className="sidebar-link"
           style={{ width: '100%', border: 'none', background: 'none', cursor: 'pointer' }}
         >
