@@ -4,6 +4,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, ResponsiveContainer, Toolti
 import { useNavigate } from 'react-router-dom';
 import { DateRangePicker } from '../components/DateRangePicker';
 import { getDB } from '../lib/db';
+import { formatToFrench } from '../lib/dateUtils';
 
 const monthNames = ["Jan", "Fév", "Mar", "Avr", "Mai", "Juin", "Juil", "Août", "Sep", "Oct", "Nov", "Déc"];
 const COLORS = ['#3b82f6', '#14b8a6', '#f59e0b', '#8b5cf6', '#f43f5e'];
@@ -67,7 +68,7 @@ export function Dashboard() {
         let lastImportStr = 'Récent';
         const logRes = db.exec("SELECT timestamp FROM import_logs ORDER BY timestamp DESC LIMIT 1");
         if (logRes.length > 0 && logRes[0].values[0][0]) {
-          lastImportStr = new Date(String(logRes[0].values[0][0])).toLocaleDateString('fr-FR');
+          lastImportStr = formatToFrench(String(logRes[0].values[0][0]));
         }
 
         let tPatients = 0;
@@ -261,14 +262,14 @@ export function Dashboard() {
 
       const res = db.exec(q, finalArgs);
       if (res.length > 0) {
-        setPraticienDetails(res[0].values.map(v => ({
-           patientId: v[0],
-           patientName: `${v[2] || ''} ${v[1] || ''}`.trim(),
-           nbConsult: Number(v[3]) || 0,
-           date: v[4] ? new Date(String(v[4])).toLocaleDateString('fr-FR') : 'Date NC',
-           prod: Number(v[5]) || 0,
-           enc: Number(v[6]) || 0
-        })));
+         setPraticienDetails(res[0].values.map(v => ({
+            patientId: v[0],
+            patientName: `${v[2] || ''} ${v[1] || ''}`.trim(),
+            nbConsult: Number(v[3]) || 0,
+            date: v[4] ? formatToFrench(String(v[4])) : 'Date NC',
+            prod: Number(v[5]) || 0,
+            enc: Number(v[6]) || 0
+         })));
       } else {
         setPraticienDetails([]);
       }

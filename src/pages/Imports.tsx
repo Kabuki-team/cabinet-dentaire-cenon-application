@@ -3,6 +3,8 @@ import { Loader2, ShieldAlert, Eye, History as HistoryIcon, FileText, CheckCircl
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 import { getDB, saveDB } from '../lib/db';
+import { calculateSimilarity } from '../lib/similarity';
+import { toISODate, formatToFrench } from '../lib/dateUtils';
 
 export function Imports() {
   const [activeTab, setActiveTab] = useState<'new' | 'history'>('new');
@@ -36,48 +38,6 @@ export function Imports() {
     } catch (e) { console.error("History load error", e); }
   };
 
-  const formatDate = (dateInput: any) => {
-    if (!dateInput) return "";
-    if (dateInput instanceof Date) return dateInput.toISOString().split('T')[0];
-    let str = String(dateInput).trim();
-    if (/^\d{1,2}[:h]\d{2}$/.test(str)) return ""; // Ignore hours if mis-mapped
-
-    // Handle Excel numeric dates (e.g. 44561)
-    if (!isNaN(Number(str)) && str.length >= 5 && !str.includes('/') && !str.includes('-')) {
-      const date = new Date((Number(str) - 25569) * 86400 * 1000);
-      return date.toISOString().split('T')[0];
-    }
-
-    // Split by any common separator
-    const parts = str.split(/[\/\-\.]/);
-    if (parts.length === 3) {
-      let part0 = parts[0].trim();
-      let part1 = parts[1].trim();
-      let part2 = parts[2].trim().split(' ')[0]; // Remove potential time tail
-
-      // Case A: YYYY-MM-DD (ISO)
-      if (part0.length === 4) {
-        return `${part0}-${part1.padStart(2, '0')}-${part2.padStart(2, '0')}`;
-      }
-      
-      // Case B: DD/MM/YYYY or MM/DD/YYYY - we assume DD/MM/YYYY (French default)
-      if (part2.length === 4 || part2.length === 2) {
-        let year = part2;
-        if (year.length === 2) year = `20${year}`;
-        const month = part1.padStart(2, '0');
-        const day = part0.padStart(2, '0');
-        return `${year}-${month}-${day}`;
-      }
-    }
-    
-    // Fallback attempt with JS Date parser for remaining cases
-    try {
-      const d = new Date(str);
-      if (!isNaN(d.getTime())) return d.toISOString().split('T')[0];
-    } catch(e) {}
-
-    return "";
-  };
 
   const normalizeName = (str: string) => {
     if (!str) return "";
@@ -85,10 +45,24 @@ export function Imports() {
   };
 
   const getMappedValue = (row: any, userKey: string) => {
+    if (!row) return null;
     if (row[userKey] !== undefined) return row[userKey];
     const keys = Object.keys(row);
     const foundKey = keys.find(k => k.toLowerCase().trim() === userKey.toLowerCase().trim());
-    return foundKey ? row[foundKey] : null;
+    if (foundKey) return row[foundKey];
+
+    // SCAN PROFOND pour les dates de naissance si non trouvée par en-tête
+    const lKey = userKey.toLowerCase();
+    if (lKey.includes("naissance") || lKey.includes("né le") || lKey.includes("ddn")) {
+       for (const k of keys) {
+          const val = String(row[k] || "").trim();
+          // Regex pour détecter AAAA-MM-JJ ou JJ/MM/AAAA
+          if (/^\d{4}-\d{2}-\d{2}/.test(val) || /^\d{2}\/\d{2}\/\d{4}/.test(val)) {
+             return val;
+          }
+       }
+    }
+    return null;
   };
 
   const parseFile = (file: File, type: 'doctolib' | 'logosw' | 'logosw_patients') => {
@@ -110,9 +84,11 @@ export function Imports() {
           }
         });
       } else {
-        const workbook = XLSX.read(bstr, { type: 'binary', cellDates: true });
+        // cellDates:false → SheetJS garde les dates comme numéros Excel bruts
+        // raw:false + dateNF → les cellules dates sont formatées en YYYY-MM-DD (string pure, sans timezone)
+        const workbook = XLSX.read(bstr, { type: 'binary', cellDates: false });
         const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-        const data = XLSX.utils.sheet_to_json(worksheet);
+        const data = XLSX.utils.sheet_to_json(worksheet, { raw: false, dateNF: 'yyyy-mm-dd' });
         setRawData(prev => ({ ...prev, [type]: data }));
         processPreview(data, type);
       }
@@ -202,15 +178,56 @@ export function Imports() {
 
      db.run("BEGIN TRANSACTION");
      try {
+       // --- MIGRATION: Normaliser TOUTES les dates de naissance existantes en ISO ---
+       setProgress("Normalisation des dates de naissance...");
+       const allDobs = db.exec("SELECT id, date_naissance FROM patients WHERE date_naissance IS NOT NULL AND date_naissance != ''");
+       if (allDobs.length > 0) {
+         let fixed = 0;
+         allDobs[0].values.forEach((row: any) => {
+           const rawDate = String(row[1]);
+           let corrected = "";
+           
+           // Pattern corrompu: "2018-07-1995" → le vrai format est 18/07/1995
+           // Détection: 3e partie a 4+ chiffres ET 1re partie de longueur 4 commence par "20" 
+           // mais la 3e partie ressemble à une année (19xx ou 20xx valide)
+           const corruptMatch = rawDate.match(/^(\d{4})-(\d{2})-(\d{4})$/);
+           if (corruptMatch) {
+             const p0 = parseInt(corruptMatch[1]); // ex: 2018
+             const p2 = parseInt(corruptMatch[3]); // ex: 1995
+             // Si la 3e partie est une année plausible (1900-2026) et la 1re dépasse 2026
+             // OU si la 3e partie commence par 19xx → c'est inversé
+             if (p2 >= 1900 && p2 <= 2026) {
+               const realDay = corruptMatch[1].substring(2); // "18" from "2018"
+               const realMonth = corruptMatch[2]; // "07"
+               corrected = `${corruptMatch[3]}-${realMonth}-${realDay}`;
+             }
+           }
+           
+           // Si pas de pattern corrompu, essayer formatDate normal
+           if (!corrected) {
+             const isoDate = toISODate(rawDate);
+             if (isoDate && isoDate !== rawDate) {
+               corrected = isoDate;
+             }
+           }
+           
+           if (corrected && corrected !== rawDate) {
+             db.run("UPDATE patients SET date_naissance = ? WHERE id = ?", [corrected, row[0]]);
+             fixed++;
+             if (fixed <= 10) console.log(`🔧 Date corrigée: "${rawDate}" → "${corrected}"`);
+           }
+         });
+         if (fixed > 0) console.log(`🔧 Migration: ${fixed} date(s) de naissance corrigée(s)`);
+       }
        // --- ÉTAPE DE NETTOYAGE (Option A) ---
        // On identifie toutes les dates présentes dans les fichiers pour les nettoyer avant injection
        const datesToClean = new Set<string>();
        rawData.doctolib.forEach(row => {
-         const d = formatDate(getMappedValue(row, "Doctolib Patient ID_1") || getMappedValue(row, "Date de début"));
+         const d = toISODate(getMappedValue(row, "Doctolib Patient ID_1") || getMappedValue(row, "Date de début"));
          if (d) datesToClean.add(d);
        });
        rawData.logosw.forEach(row => {
-         const d = formatDate(getMappedValue(row, "Date"));
+         const d = toISODate(getMappedValue(row, "Date"));
          if (d) datesToClean.add(d);
        });
 
@@ -226,20 +243,36 @@ export function Imports() {
          if (!pIdExRaw) continue;
          const pIdEx = String(pIdExRaw);
 
-         const nom = getMappedValue(row, "Nom du patient") || "";
-         const prenom = getMappedValue(row, "Prénom du patient") || "";
+         const nom = getMappedValue(row, "Nom du patient") || getMappedValue(row, "Nom") || "";
+         const prenom = getMappedValue(row, "Prénom du patient") || getMappedValue(row, "Prénom") || "";
          const norm = normalizeName(`${nom} ${prenom}`);
+         
+         // Détection robuste de la date de naissance Doctolib
+         const rawDob = getMappedValue(row, "Date de naissance")
+           || getMappedValue(row, "Né(e) le")
+           || getMappedValue(row, "Né le")
+           || getMappedValue(row, "DDN")
+           || getMappedValue(row, "Date naissance")
+           || getMappedValue(row, "Date de naissance du patient")
+           || getMappedValue(row, "Patient - Date de naissance");
+           
+         const bDate = toISODate(rawDob);
+         
+         // Log pour déboguer les premiers patients
+         if (rawData.doctolib.indexOf(row) < 5) {
+           console.log(`👨‍⚕️ Import Doctolib [${rawData.doctolib.indexOf(row)}]: ${nom} ${prenom} | Colonne brute="${rawDob}" → ISO="${bDate}"`);
+         }
 
          db.run(`INSERT INTO patients (doctolib_id, civilite, nom, prenom, nom_complet_norm, nom_doctolib, nom_naissance, date_naissance, email, telephone, adresse, code_postal, ville)
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                  ON CONFLICT(doctolib_id) DO UPDATE SET
                  nom=excluded.nom, prenom=excluded.prenom, nom_complet_norm=excluded.nom_complet_norm, nom_doctolib=excluded.nom_doctolib, nom_naissance=excluded.nom_naissance, date_naissance=excluded.date_naissance, telephone=excluded.telephone, email=excluded.email, adresse=excluded.adresse, civilite=excluded.civilite, code_postal=excluded.code_postal, ville=excluded.ville`,
-                [pIdEx, getMappedValue(row, "Civilité"), nom, prenom, norm, `${nom} ${prenom}`, getMappedValue(row, "Nom de naissance"), formatDate(getMappedValue(row, "Date de naissance")), getMappedValue(row, "Email du patient"), getMappedValue(row, "Téléphone portable"), getMappedValue(row, "Adresse"), getMappedValue(row, "Code postal"), getMappedValue(row, "Ville")]);
+                [pIdEx, getMappedValue(row, "Civilité"), nom, prenom, norm, `${nom} ${prenom}`, getMappedValue(row, "Nom de naissance"), bDate, getMappedValue(row, "Email du patient"), getMappedValue(row, "Téléphone portable"), getMappedValue(row, "Adresse"), getMappedValue(row, "Code postal"), getMappedValue(row, "Ville")]);
 
          const pIdRes = db.exec(`SELECT id FROM patients WHERE doctolib_id = ?`, [pIdEx]);
          const pIdInternal = pIdRes[0]?.values[0][0];
 
-         const visitDate = formatDate(getMappedValue(row, "Doctolib Patient ID_1") || getMappedValue(row, "Date de début"));
+         const visitDate = toISODate(getMappedValue(row, "Doctolib Patient ID_1") || getMappedValue(row, "Date de début"));
          db.run(`INSERT INTO appointments (appointment_uid, patient_id, date, heure, praticien, motif, statut, import_id)
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
                 [getMappedValue(row, "Id") || Math.random().toString(), pIdInternal, visitDate, getMappedValue(row, "Début") || "", getMappedValue(row, "Agenda") || "", getMappedValue(row, "Motif du RDV") || "", getMappedValue(row, "Statut") || "", importId]);
@@ -253,19 +286,63 @@ export function Imports() {
        const logosLookup = new Map<string, any>();
        if (rawData.logosw_patients) {
          db.run("DELETE FROM logosw_dictionary"); // On rafraîchit le dictionnaire à chaque import
-         rawData.logosw_patients.forEach(p => {
-            const nom = getMappedValue(p, "Nom") || getMappedValue(p, "Patient") || "";
-            const prenom = getMappedValue(p, "Prénom") || getMappedValue(p, "Prenom") || "";
+         
+         // DEBUG: Afficher les noms de colonnes du premier enregistrement
+         if (rawData.logosw_patients.length > 0) {
+           const sampleKeys = Object.keys(rawData.logosw_patients[0]);
+           console.group("📋 Dictionnaire LogosW - Debug");
+           console.log("Colonnes détectées:", sampleKeys.join(", "));
+           const sample = rawData.logosw_patients[0];
+           console.log("Exemple ligne 1:", JSON.stringify(sample));
+         }
+         
+         let dictInserted = 0;
+         let dictNoDob = 0;
+         
+         rawData.logosw_patients.forEach((p, idx) => {
+            let nom = (getMappedValue(p, "Nom") || getMappedValue(p, "Patient") || "").trim();
+            let prenom = (getMappedValue(p, "Prénom") || getMappedValue(p, "Prenom") || "").trim();
+            
+            if (!prenom && nom.includes(" ")) {
+              const pts = nom.split(" ");
+              nom = pts[0];
+              prenom = pts.slice(1).join(" ");
+            }
             const n = normalizeName(nom + " " + prenom);
             logosLookup.set(n, p);
-            const dos = String(getMappedValue(p, "Numéro") || getMappedValue(p, "Numero") || "").trim();
+            const dos = String(getMappedValue(p, "Numéro") || getMappedValue(p, "Numero") || getMappedValue(p, "Dossier") || getMappedValue(p, "N°") || "").trim();
             if (dos) {
               logosLookup.set(dos, p);
-              const bDate = formatDate(getMappedValue(p, "Naissance") || getMappedValue(p, "Né le") || getMappedValue(p, "Nee le") || getMappedValue(p, "Date de naissance"));
+              
+              // Tentative de récupération de la date de naissance avec TOUS les noms possibles
+              const rawDob = getMappedValue(p, "Naissance") 
+                || getMappedValue(p, "Né le") 
+                || getMappedValue(p, "Nee le") 
+                || getMappedValue(p, "Date de naissance")
+                || getMappedValue(p, "Date naissance")
+                || getMappedValue(p, "DDN")
+                || getMappedValue(p, "Né(e) le");
+              
+              const bDate = toISODate(rawDob);
+              
+              // Log les 5 premiers pour debug
+              if (idx < 5) {
+                console.log(`  Patient ${dos}: "${nom} ${prenom}" | DDN brute="${rawDob}" → FR="${formatToFrench(bDate)}"`);
+              }
+              
+              if (bDate) {
+                dictInserted++;
+              } else {
+                dictNoDob++;
+              }
+              
               db.run("INSERT OR REPLACE INTO logosw_dictionary (dossier_id, nom, prenom, nom_complet_norm, date_naissance) VALUES (?, ?, ?, ?, ?)",
                      [dos, nom, prenom, n, bDate]);
             }
          });
+         
+         console.log(`📊 Dictionnaire: ${dictInserted} avec DDN, ${dictNoDob} sans DDN, ${rawData.logosw_patients.length} total`);
+         console.groupEnd();
        }
 
        for (const row of rawData.logosw) {
@@ -273,7 +350,7 @@ export function Imports() {
          if (!label || LOGOSW_BLACKLIST.some(kw => label.toLowerCase().includes(kw))) continue;
 
          const norm = normalizeName(label);
-         const visitDate = formatDate(getMappedValue(row, "Date"));
+         const visitDate = toISODate(getMappedValue(row, "Date"));
          
          const dosId = String(getMappedValue(row, "Dossier") || getMappedValue(row, "Doss") || getMappedValue(row, "N° Dossier") || "").trim();
          
@@ -307,7 +384,7 @@ export function Imports() {
             const dictP = (dosId ? logosLookup.get(dosId) : null) || logosLookup.get(norm);
             
             if (dictP) {
-               const bDate = formatDate(getMappedValue(dictP, "Naissance") || getMappedValue(dictP, "Né le") || getMappedValue(dictP, "Nee le"));
+               const bDate = toISODate(getMappedValue(dictP, "Naissance") || getMappedValue(dictP, "Né le") || getMappedValue(dictP, "Nee le"));
                const dos = String(getMappedValue(dictP, "Numéro") || getMappedValue(dictP, "Numero") || "");
                const nomLogosBridge = ((getMappedValue(dictP, "Nom") || getMappedValue(dictP, "Patient") || "") + " " + (getMappedValue(dictP, "Prénom") || getMappedValue(dictP, "Prenom") || "")).trim();
                const normBridge = normalizeName(nomLogosBridge);
@@ -425,68 +502,77 @@ export function Imports() {
        setProgress("Réconciliation finale des identités...");
        if (rawData.logosw_patients && rawData.logosw_patients.length > 0) {
           console.group("🔍 Passe de réconciliation finale");
-          let reconciled = 0;
           
+          // === DIAGNOSTIC: Voir ce qui est RÉELLEMENT dans la table patients ===
+          const sampleDates = db.exec("SELECT id, nom, prenom, date_naissance FROM patients LIMIT 10");
+          if (sampleDates.length > 0) {
+            console.group("📊 DIAGNOSTIC - Dates de naissance dans la table patients:");
+            sampleDates[0].values.forEach((v: any) => console.log(`  Patient #${v[0]}: ${v[1]} ${v[2]} → DDN="${v[3]}" (type: ${typeof v[3]}, length: ${String(v[3] || '').length})`));
+            console.groupEnd();
+          }
+          const totalWithDob = db.exec("SELECT COUNT(*) FROM patients WHERE date_naissance IS NOT NULL AND date_naissance != '' AND length(date_naissance) >= 8");
+          const totalPatients = db.exec("SELECT COUNT(*) FROM patients");
+          console.log(`📊 Patients total: ${totalPatients[0]?.values[0][0]}, avec DDN valide: ${totalWithDob[0]?.values[0][0]}`);
+          
+          // Test avec une date connue de LogosW
+          const firstP = rawData.logosw_patients[0];
+          const firstDos = String(getMappedValue(firstP, "Numéro") || getMappedValue(firstP, "Numero") || "").trim();
+          const firstDobRaw = getMappedValue(firstP, "Naissance") || getMappedValue(firstP, "Né le") || getMappedValue(firstP, "Nee le") || getMappedValue(firstP, "Date de naissance");
+          let reconciled = 0;
+          const stmtSearch = db.prepare("SELECT id, nom, prenom, nom_naissance, dossier_logosw FROM patients WHERE date_naissance = ?");
+          const stmtUpdate = db.prepare("UPDATE patients SET dossier_logosw = ?, nom_logosw = ?, has_warning = 0 WHERE id = ?");
+
           for (const p of rawData.logosw_patients) {
              const dos = String(getMappedValue(p, "Numéro") || getMappedValue(p, "Numero") || "").trim();
              if (!dos) continue;
              
-             // Vérifier si ce dossier est déjà lié
-             const already = db.exec(`SELECT id FROM patients WHERE dossier_logosw = ?`, [dos]);
-             if (already.length > 0 && already[0].values.length > 0) continue;
-             
+             // Déjà lié ?
+             const alreadyRes = db.exec(`SELECT id FROM patients WHERE dossier_logosw = ?`, [dos]);
+             if (alreadyRes.length > 0 && alreadyRes[0].values.length > 0) continue;
+
              const logosNom = String(getMappedValue(p, "Nom") || getMappedValue(p, "Patient") || "").trim();
              const logosPrenom = String(getMappedValue(p, "Prénom") || getMappedValue(p, "Prenom") || "").trim();
-             const bDateRaw = getMappedValue(p, "Naissance") || getMappedValue(p, "Né le") || getMappedValue(p, "Nee le") || getMappedValue(p, "Date de naissance");
-             const bDate = formatDate(bDateRaw);
+             const bDate = toISODate(getMappedValue(p, "Naissance") || getMappedValue(p, "Né le") || getMappedValue(p, "Nee le") || getMappedValue(p, "Date de naissance"));
              
-             if (!bDate || bDate.length < 8) {
-                console.warn(`⏭ ${logosNom} ${logosPrenom} (Dossier ${dos}) - Pas de date de naissance exploitable (raw: ${bDateRaw})`);
-                continue;
+             if (!bDate) continue;
+             
+             stmtSearch.bind([bDate]);
+             const candidates = [];
+             while(stmtSearch.step()) {
+               candidates.push(stmtSearch.get());
              }
+             stmtSearch.reset();
              
-             // Chercher tous les patients avec cette date de naissance
-             const candidates = db.exec(`SELECT id, nom, prenom, nom_naissance, dossier_logosw FROM patients WHERE date_naissance = ?`, [bDate]);
+             if (candidates.length === 0) continue;
              
-             if (candidates.length === 0 || candidates[0].values.length === 0) {
-                console.warn(`❌ ${logosNom} ${logosPrenom} (Dossier ${dos}, DDN: ${bDate}) → Aucun patient Doctolib avec cette date`);
-                continue;
-             }
-             
-             const splitW = (t: string) => t.toLowerCase().replace(/[^a-zàâäéèêëïîôùûüÿçœæ\-\s]/g, '').split(/[\s\-]+/).filter(w => w.length > 1);
-             const mScore = (wA: string[], wB: string[]) => {
-               if (!wA.length || !wB.length) return 0;
-               const aInB = wA.filter(wa => wB.some(wb => wb.includes(wa) || wa.includes(wb))).length;
-               const bInA = wB.filter(wb => wA.some(wa => wa.includes(wb) || wb.includes(wa))).length;
-               return Math.round(Math.max(aInB / wA.length, bInA / wB.length) * 100);
-             };
-
-             const logosWords = splitW(`${logosNom} ${logosPrenom}`);
-             let bestId = null;
+             let bestCandidate = null;
              let bestScore = 0;
              
-             candidates[0].values.forEach((v: any) => {
-                if (v[4] && String(v[4]).trim()) return; // Déjà lié à un dossier
-                
-                const dbWords = splitW(`${v[1] || ''} ${v[2] || ''} ${v[3] || ''}`);
-                const score = mScore(logosWords, dbWords);
-                
-                if (score > bestScore) {
-                   bestScore = score;
-                   bestId = v[0];
-                }
-             });
+             for (const cand of candidates) {
+               // cand: [id, nom, prenom, nom_naissance, dossier_logosw]
+               if (cand[4]) continue; // Déjà lié
+
+               const nameLogos = `${logosNom} ${logosPrenom}`;
+               const nameDoctolib = `${cand[1]} ${cand[2]} ${cand[3] || ''}`;
+               const score = calculateSimilarity(nameLogos, nameDoctolib);
+               
+               if (score > bestScore) {
+                 bestScore = score;
+                 bestCandidate = cand;
+               }
+             }
              
-             if (bestId && bestScore >= 50) {
-                db.run(`UPDATE patients SET dossier_logosw = ?, nom_logosw = ?, has_warning = 1 WHERE id = ?`, [dos, `${logosNom} ${logosPrenom}`.trim(), bestId]);
-                reconciled++;
-                console.log(`✅ ${logosNom} ${logosPrenom} (Dossier ${dos}) → Lié au patient #${bestId} (score: ${bestScore}%)`);
-             } else {
-                console.warn(`⚠️ ${logosNom} ${logosPrenom} (Dossier ${dos}, DDN: ${bDate}) → ${candidates[0].values.length} candidat(s), meilleur score: ${bestScore}%`);
+             // Seuil de confiance automatique élevé (95%)
+             // Si un seul candidat avec un score correct (> 70%), on lie aussi
+             if (bestCandidate && (bestScore >= 95 || (candidates.length === 1 && bestScore >= 70))) {
+               stmtUpdate.run([dos, `${logosNom} ${logosPrenom}`, bestCandidate[0]]);
+               reconciled++;
              }
           }
+          stmtSearch.free();
+          stmtUpdate.free();
           
-          console.log(`📊 Réconciliation terminée : ${reconciled} patient(s) nouvellement liés`);
+          console.log(`📊 Réconciliation terminée : ${reconciled} patient(s) liés automatiquement`);
           console.groupEnd();
        }
 
@@ -500,7 +586,7 @@ export function Imports() {
          if (date > maxDateStr) maxDateStr = date;
        }
        const periodStr = minDateStr <= maxDateStr 
-         ? `Du ${new Date(minDateStr).toLocaleDateString('fr-FR')} au ${new Date(maxDateStr).toLocaleDateString('fr-FR')}` 
+         ? `Du ${formatToFrench(minDateStr)} au ${formatToFrench(maxDateStr)}` 
          : '';
 
        const newStats = calculateStatsSync(db, minDateStr <= maxDateStr ? minDateStr : undefined, maxDateStr >= minDateStr ? maxDateStr : undefined);

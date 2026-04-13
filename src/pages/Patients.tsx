@@ -2,20 +2,9 @@ import { useState, useEffect } from 'react';
 import { Search, ChevronRight, ChevronLeft, User, ShieldAlert, CheckCircle2, Link2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { getDB, saveDB } from '../lib/db';
+import { calculateSimilarity } from '../lib/similarity';
+import { formatToFrench } from '../lib/dateUtils';
 
-// Découpe un nom en mots atomiques (gère les tirets et espaces)
-const splitWords = (txt: string) => 
-  txt.toLowerCase().replace(/[^a-zàâäéèêëïîôùûüÿçœæ\-\s]/g, '').split(/[\s\-]+/).filter(w => w.length > 1);
-
-// Score bidirectionnel : combien de mots de A sont dans B ET de B sont dans A
-const matchScore = (wordsA: string[], wordsB: string[]): number => {
-  if (wordsA.length === 0 || wordsB.length === 0) return 0;
-  const aInB = wordsA.filter(wa => wordsB.some(wb => wb.includes(wa) || wa.includes(wb))).length;
-  const bInA = wordsB.filter(wb => wordsA.some(wa => wa.includes(wb) || wb.includes(wa))).length;
-  const scoreA = aInB / wordsA.length;
-  const scoreB = bInA / wordsB.length;
-  return Math.round(Math.max(scoreA, scoreB) * 100);
-};
 
 export function Patients() {
   const navigate = useNavigate();
@@ -103,25 +92,31 @@ export function Patients() {
 
            // Smart-Match suggestion for non-synced patients
            let suggestion: any = null;
-           if (!v[10] && dob) {
-             try {
-               const candidates = db.exec(`SELECT dossier_id, nom, prenom, nom_complet_norm FROM logosw_dictionary WHERE date_naissance = ?`, [dob]);
-               if (candidates.length > 0 && candidates[0].values.length > 0) {
-                 const patientWords = splitWords(`${v[1] || ''} ${v[2] || ''} ${nomNaissance || ''}`);
-                 let bestS: any = null;
-                 let bestScore = 0;
-                 candidates[0].values.forEach((lp: any) => {
-                   const lpWords = splitWords(`${lp[1] || ''} ${lp[2] || ''}`);
-                   const score = matchScore(patientWords, lpWords);
-                   if (score > bestScore) {
-                     bestScore = score;
-                     bestS = { id: lp[0], name: `${lp[1]} ${lp[2]}`.trim(), score };
-                   }
-                 });
-                 if (bestS && bestScore >= 30) suggestion = bestS;
-               }
-             } catch(e) {}
-           }
+            if (!v[10] && dob) {
+              try {
+                const candidates = db.exec(`SELECT dossier_id, nom, prenom, nom_complet_norm FROM logosw_dictionary WHERE date_naissance = ?`, [dob]);
+                if (candidates.length > 0 && candidates[0].values.length > 0) {
+                  const targetName = `${v[1] || ''} ${v[2] || ''} ${nomNaissance || ''}`;
+                  let bestS: any = null;
+                  let bestScore = 0;
+                  candidates[0].values.forEach((lp: any) => {
+                    const candName = `${lp[1] || ''} ${lp[2] || ''}`;
+                    const score = calculateSimilarity(targetName, candName);
+                    if (score > bestScore) {
+                      bestScore = score;
+                      bestS = { id: lp[0], name: `${lp[1]} ${lp[2]}`.trim(), score };
+                    }
+                  });
+                  
+                  if (bestS) {
+                    const totalOnDate = candidates[0].values.length;
+                    if (totalOnDate === 1 || bestScore >= 30) {
+                      suggestion = { ...bestS, name: `Mme/M. ${bestS.name}` };
+                    }
+                  }
+                }
+              } catch(e) { console.error("Erreur lors de la recherche de suggestion:", e); }
+            }
 
            return {
              id: v[0],
@@ -240,7 +235,7 @@ export function Patients() {
                                 backgroundColor: patient.suggestion.score >= 80 ? '#dcfce7' : patient.suggestion.score >= 50 ? '#fef9c3' : '#fee2e2',
                                 color: patient.suggestion.score >= 80 ? '#166534' : patient.suggestion.score >= 50 ? '#854d0e' : '#991b1b',
                               }}>{patient.suggestion.score}%</span>
-                              <span style={{ fontSize: '0.8rem', fontWeight: 500 }}>{patient.suggestion.name}</span>
+                              <span style={{ fontSize: '0.8rem', fontWeight: 500 }}>Potentiellement <strong>{patient.suggestion.name}</strong></span>
                             </div>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.7rem', color: 'var(--text-muted)' }}>
                               <span>Dossier #{patient.suggestion.id}</span>
@@ -253,11 +248,10 @@ export function Patients() {
                                   if (!db) return;
                                   db.run('UPDATE patients SET dossier_logosw = ?, nom_logosw = ?, has_warning = 0 WHERE id = ?', [patient.suggestion.id, patient.suggestion.name, patient.id]);
                                   await saveDB();
-                                  setPage(p => p); // force re-render
                                   window.location.reload();
                                 }}
                               >
-                                <Link2 size={10} /> Lier
+                                <Link2 size={10} /> Confirmer le lien
                               </button>
                             </div>
                           </div>
@@ -266,7 +260,7 @@ export function Patients() {
                         )}
                       </td>
                     )}
-                    <td>{patient.lastConsult === 'Aucune' ? 'Aucune' : new Date(patient.lastConsult).toLocaleDateString('fr-FR')}</td>
+                    <td>{patient.lastConsult === 'Aucune' ? 'Aucune' : formatToFrench(patient.lastConsult)}</td>
                     <td>{patient.count}</td>
                     <td style={{ fontWeight: 500, color: 'var(--warning-text)' }}>{patient.total_prod}</td>
                     <td style={{ fontWeight: 500, color: 'var(--success-text)' }}>{patient.total_enc}</td>
