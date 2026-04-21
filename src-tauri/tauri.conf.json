@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Cabinet Dentaire Cenon",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "identifier": "fr.cenon.cabinet-dentaire",
   "build": {
     "frontendDist": "../dist",
@@ -26,9 +26,18 @@
       "csp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https://cabinet-dentaire-cenon.fr; connect-src 'self'; worker-src 'self' blob:"
     }
   },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDhCRDE3RjIxMUUxMzA5OTUKUldTVkNSTWVJWC9SaTYzcjhQOUg4bHpRbWZ6WWc1ckhsZkNxNS9XYXlWM1BjNC9zT1h2N1d2R1UK",
+      "endpoints": [
+        "https://github.com/Kabuki-team/cabinet-dentaire-cenon-application/releases/latest/download/latest.json"
+      ]
+    }
+  },
   "bundle": {
     "active": true,
     "targets": "all",
+    "createUpdaterArtifacts": true,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

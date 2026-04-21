@@ -638,3 +638,6 @@ tbody tr:hover td { background: var(--fill-secondary); }
   padding: 0; margin: -1px;
   overflow: hidden; clip: rect(0,0,0,0); border: 0;
 }
+
+@keyframes spin { to { transform: rotate(360deg); } }
+.spin { animation: spin 1s linear infinite; }

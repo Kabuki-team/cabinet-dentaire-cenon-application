@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { AlertTriangle, X } from 'lucide-react';
+import { AlertTriangle, X, ChevronRight, Users, Calendar, TrendingUp, Wallet, Inbox } from 'lucide-react';
 import { DashboardSkeleton } from '../components/Skeleton';
 import { ComposedChart, Bar, XAxis, YAxis, CartesianGrid, ResponsiveContainer, Tooltip, Legend, PieChart, Pie, Cell, Line, BarChart } from 'recharts';
 import { useNavigate } from 'react-router-dom';
@@ -695,49 +695,118 @@ export function Dashboard() {
         </div>
       </div>
 
-      {selectedPraticien && (
-        <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: '2rem' }} onClick={() => setSelectedPraticien(null)}>
-          <div style={{ width: '100%', maxWidth: '800px', maxHeight: '90vh', backgroundColor: 'var(--card)', boxShadow: 'var(--shadow-lg)', borderRadius: '1rem', display: 'flex', flexDirection: 'column' }} onClick={e => e.stopPropagation()}>
-            <div style={{ padding: '1.5rem', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div>
-                <h2 style={{ fontSize: '1.25rem', fontWeight: 600 }}>Détails d'activité : {selectedPraticien}</h2>
-                <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)', margin: 0 }}>Consultations et règlements associés à ce praticien</p>
+      {selectedPraticien && (() => {
+        const totals = praticienDetails.reduce(
+          (acc, d) => ({
+            patients: acc.patients + 1,
+            consults: acc.consults + (d.nbConsult || 0),
+            prod: acc.prod + (d.prod || 0),
+            enc: acc.enc + (d.enc || 0),
+          }),
+          { patients: 0, consults: 0, prod: 0, enc: 0 }
+        );
+        const initials = selectedPraticien.split(' ').map(s => s[0]).filter(Boolean).slice(0, 2).join('').toUpperCase();
+        const formatEUR = (v: number) => v.toLocaleString('fr-FR', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 });
+        const periodeLabel = dateRange.start && dateRange.end
+          ? `du ${dateRange.start.toLocaleDateString('fr-FR')} au ${dateRange.end.toLocaleDateString('fr-FR')}`
+          : 'toutes périodes confondues';
+
+        return (
+        <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(2px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: '2rem' }} onClick={() => setSelectedPraticien(null)}>
+          <div style={{ width: '100%', maxWidth: '920px', maxHeight: '90vh', backgroundColor: 'var(--card)', boxShadow: 'var(--shadow-lg)', borderRadius: '1rem', display: 'flex', flexDirection: 'column', overflow: 'hidden' }} onClick={e => e.stopPropagation()}>
+            {/* Header */}
+            <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '1rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.875rem', minWidth: 0 }}>
+                <div style={{ width: '44px', height: '44px', borderRadius: '50%', backgroundColor: 'var(--primary-light)', color: 'var(--primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: '0.95rem', flexShrink: 0 }}>
+                  {initials || '?'}
+                </div>
+                <div style={{ minWidth: 0 }}>
+                  <h2 style={{ fontSize: '1.15rem', fontWeight: 600, margin: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{selectedPraticien}</h2>
+                  <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: '0.15rem 0 0 0' }}>Détails d'activité — {periodeLabel}</p>
+                </div>
               </div>
-              <button className="btn btn-ghost" onClick={() => setSelectedPraticien(null)} style={{ padding: '0.5rem' }}>
+              <button className="btn btn-ghost" onClick={() => setSelectedPraticien(null)} style={{ padding: '0.5rem', flexShrink: 0 }} aria-label="Fermer">
                 <X size={20} />
               </button>
             </div>
-            
-            <div style={{ overflowY: 'auto', flex: 1, padding: '1.5rem', backgroundColor: 'var(--bg)' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', backgroundColor: 'white', borderRadius: '0.5rem', overflow: 'hidden', boxShadow: 'var(--shadow-sm)' }}>
-                <thead>
-                  <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                    <th style={{ textAlign: 'left', padding: '1rem', fontSize: '0.875rem', fontWeight: 600, color: 'var(--text-muted)' }}>Dernière consult.</th>
-                    <th style={{ textAlign: 'left', padding: '1rem', fontSize: '0.875rem', fontWeight: 600, color: 'var(--text-muted)' }}>Patient</th>
-                    <th style={{ textAlign: 'right', padding: '1rem', fontSize: '0.875rem', fontWeight: 600, color: 'var(--warning-text)' }}>Production (Période)</th>
-                    <th style={{ textAlign: 'right', padding: '1rem', fontSize: '0.875rem', fontWeight: 600, color: 'var(--success-text)' }}>Règlement (Période)</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {praticienDetails.length === 0 ? (
-                    <tr><td colSpan={4} style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>Aucune consultation correspondante trouvée.</td></tr>
-                  ) : praticienDetails.map((det, i) => (
-                    <tr key={i} style={{ borderBottom: i === praticienDetails.length - 1 ? 'none' : '1px solid var(--border)', cursor: 'pointer', transition: 'background-color 0.2s' }} onClick={() => navigate(`/patients/${det.patientId}`)} onMouseOver={(e) => e.currentTarget.style.backgroundColor = 'var(--primary-light)'} onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'white'}>
-                      <td style={{ padding: '1rem', fontSize: '0.875rem', fontWeight: 500 }}>{det.date}</td>
-                      <td style={{ padding: '1rem', fontSize: '0.875rem', fontWeight: 600, color: 'var(--primary)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                        {det.patientName} 
-                        {det.nbConsult > 1 && <span className="badge badge-success" style={{ fontSize: '0.7rem', padding: '0.1rem 0.4rem' }}>{det.nbConsult} RDV</span>}
-                      </td>
-                      <td style={{ padding: '1rem', fontSize: '0.875rem', textAlign: 'right', fontWeight: 500 }}>{det.prod > 0 ? det.prod.toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' }) : '-'}</td>
-                      <td style={{ padding: '1rem', fontSize: '0.875rem', textAlign: 'right', fontWeight: 600, color: 'var(--success-text)' }}>{det.enc > 0 ? det.enc.toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' }) : '-'}</td>
+
+            {/* Summary KPIs */}
+            {praticienDetails.length > 0 && (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1px', backgroundColor: 'var(--border)', borderBottom: '1px solid var(--border)' }}>
+                {[
+                  { icon: <Users size={16} />, label: 'Patients', value: totals.patients.toString(), color: 'var(--primary)' },
+                  { icon: <Calendar size={16} />, label: 'Consultations', value: totals.consults.toString(), color: 'var(--text)' },
+                  { icon: <TrendingUp size={16} />, label: 'Production', value: formatEUR(totals.prod), color: 'var(--warning-text)' },
+                  { icon: <Wallet size={16} />, label: 'Encaissé', value: formatEUR(totals.enc), color: 'var(--success-text)' },
+                ].map((kpi, idx) => (
+                  <div key={idx} style={{ backgroundColor: 'var(--card)', padding: '0.875rem 1rem', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem', color: 'var(--text-muted)', fontSize: '0.7rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.03em' }}>
+                      {kpi.icon}
+                      <span>{kpi.label}</span>
+                    </div>
+                    <div style={{ fontSize: '1.1rem', fontWeight: 700, color: kpi.color, fontVariantNumeric: 'tabular-nums' }}>{kpi.value}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Table body */}
+            <div style={{ overflowY: 'auto', flex: 1, backgroundColor: 'var(--bg)' }}>
+              {praticienDetails.length === 0 ? (
+                <div style={{ padding: '3rem 1.5rem', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.75rem', color: 'var(--text-muted)' }}>
+                  <Inbox size={36} style={{ opacity: 0.5 }} />
+                  <p style={{ margin: 0, fontSize: '0.9rem' }}>Aucune consultation correspondante trouvée.</p>
+                </div>
+              ) : (
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontVariantNumeric: 'tabular-nums' }}>
+                  <thead style={{ position: 'sticky', top: 0, zIndex: 1 }}>
+                    <tr style={{ backgroundColor: 'var(--card)', boxShadow: '0 1px 0 var(--border)' }}>
+                      <th style={{ textAlign: 'left', padding: '0.75rem 1.5rem', fontSize: '0.7rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Dernière consult.</th>
+                      <th style={{ textAlign: 'left', padding: '0.75rem 1rem', fontSize: '0.7rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Patient</th>
+                      <th style={{ textAlign: 'right', padding: '0.75rem 1rem', fontSize: '0.7rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Production</th>
+                      <th style={{ textAlign: 'right', padding: '0.75rem 1rem', fontSize: '0.7rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Encaissé</th>
+                      <th style={{ width: '32px', padding: '0.75rem 1rem 0.75rem 0' }}></th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {praticienDetails.map((det, i) => (
+                      <tr
+                        key={i}
+                        style={{ backgroundColor: i % 2 === 0 ? 'var(--card)' : 'var(--bg)', cursor: 'pointer', transition: 'background-color 0.15s' }}
+                        onClick={() => navigate(`/patients/${det.patientId}`)}
+                        onMouseOver={(e) => { e.currentTarget.style.backgroundColor = 'var(--primary-light)'; }}
+                        onMouseOut={(e) => { e.currentTarget.style.backgroundColor = i % 2 === 0 ? 'var(--card)' : 'var(--bg)'; }}
+                      >
+                        <td style={{ padding: '0.85rem 1.5rem', fontSize: '0.875rem', fontWeight: 500, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{det.date}</td>
+                        <td style={{ padding: '0.85rem 1rem', fontSize: '0.9rem' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                            <span style={{ fontWeight: 600, color: 'var(--primary)' }}>{det.patientName}</span>
+                            {det.nbConsult > 1 && (
+                              <span className="badge badge-info" style={{ fontSize: '0.7rem', padding: '0.1rem 0.45rem', fontWeight: 600 }}>
+                                {det.nbConsult} RDV
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td style={{ padding: '0.85rem 1rem', fontSize: '0.9rem', textAlign: 'right', fontWeight: 500, color: det.prod > 0 ? 'var(--text)' : 'var(--text-muted)' }}>
+                          {det.prod > 0 ? formatEUR(det.prod) : '—'}
+                        </td>
+                        <td style={{ padding: '0.85rem 1rem', fontSize: '0.9rem', textAlign: 'right', fontWeight: 600, color: det.enc > 0 ? 'var(--success-text)' : 'var(--text-muted)' }}>
+                          {det.enc > 0 ? formatEUR(det.enc) : '—'}
+                        </td>
+                        <td style={{ padding: '0.85rem 1rem 0.85rem 0', textAlign: 'right', color: 'var(--text-muted)' }}>
+                          <ChevronRight size={16} />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
             </div>
           </div>
         </div>
-      )}
+        );
+      })()}
     </div>
   );
 }

@@ -9,6 +9,7 @@ import { Revenues } from './pages/Revenues';
 import { Imports } from './pages/Imports';
 import { Recouvrement } from './pages/Recouvrement';
 import { Login } from './pages/Login';
+import { UpdateNotifier } from './components/UpdateNotifier';
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
   return sessionStorage.getItem('authenticated') === '1'
@@ -19,6 +20,7 @@ function PrivateRoute({ children }: { children: React.ReactNode }) {
 function App() {
   return (
     <HashRouter>
+      <UpdateNotifier />
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route path="/" element={<PrivateRoute><Layout /></PrivateRoute>}>
