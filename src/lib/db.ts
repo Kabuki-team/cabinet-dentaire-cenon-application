@@ -112,6 +112,18 @@ export const initDB = async () => {
   }
 
   try {
+    db.run(`ALTER TABLE clinical_acts ADD COLUMN cotation TEXT;`);
+  } catch (e) {
+    // Column already exists, safe to ignore
+  }
+
+  try {
+    db.run(`ALTER TABLE clinical_acts ADD COLUMN dents TEXT;`);
+  } catch (e) {
+    // Column already exists, safe to ignore
+  }
+
+  try {
     db.run(`ALTER TABLE clinical_acts ADD COLUMN import_id TEXT;`);
     db.run(`ALTER TABLE appointments ADD COLUMN import_id TEXT;`);
     db.run(`ALTER TABLE import_logs ADD COLUMN import_id TEXT;`);
@@ -159,6 +171,63 @@ export const initDB = async () => {
       nom_complet_norm TEXT,
       date_naissance TEXT
     );
+    CREATE TABLE IF NOT EXISTS patient_comments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      patient_id INTEGER NOT NULL,
+      content TEXT NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(patient_id) REFERENCES patients(id)
+    );
+    CREATE TABLE IF NOT EXISTS manual_adjustments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      patient_id INTEGER NOT NULL,
+      date TEXT NOT NULL,
+      libelle TEXT NOT NULL,
+      montant_acte DECIMAL(10,2) DEFAULT 0,
+      reglement_somme DECIMAL(10,2) DEFAULT 0,
+      type TEXT,
+      comment TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      deleted_at DATETIME DEFAULT NULL,
+      FOREIGN KEY(patient_id) REFERENCES patients(id)
+    );
+  `);
+
+  // VIEW unifiant actes importés + ajustements manuels actifs.
+  // Les requêtes d'agrégat (totaux, revenus, encaissement) doivent utiliser cette VIEW pour intégrer les ajustements.
+  db.run(`DROP VIEW IF EXISTS financial_entries;`);
+  db.run(`
+    CREATE VIEW financial_entries AS
+      SELECT
+        id, patient_id, date, libelle,
+        COALESCE(montant_acte, 0) as montant_acte,
+        COALESCE(reglement_somme, 0) as reglement_somme,
+        type, source, logosw_praticien,
+        cotation,
+        dents,
+        0 as is_manual,
+        NULL as comment,
+        NULL as created_at,
+        NULL as updated_at
+      FROM clinical_acts
+      UNION ALL
+      SELECT
+        id, patient_id, date, libelle,
+        COALESCE(montant_acte, 0) as montant_acte,
+        COALESCE(reglement_somme, 0) as reglement_somme,
+        type,
+        'MANUAL' as source,
+        NULL as logosw_praticien,
+        NULL as cotation,
+        NULL as dents,
+        1 as is_manual,
+        comment,
+        created_at,
+        updated_at
+      FROM manual_adjustments
+      WHERE deleted_at IS NULL;
   `);
 
   await saveDB();

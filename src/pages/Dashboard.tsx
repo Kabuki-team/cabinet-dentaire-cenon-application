@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { AlertTriangle, X } from 'lucide-react';
+import { DashboardSkeleton } from '../components/Skeleton';
 import { ComposedChart, Bar, XAxis, YAxis, CartesianGrid, ResponsiveContainer, Tooltip, Legend, PieChart, Pie, Cell, Line, BarChart } from 'recharts';
 import { useNavigate } from 'react-router-dom';
 import { DateRangePicker } from '../components/DateRangePicker';
@@ -15,6 +16,7 @@ export function Dashboard() {
   const [selectedPraticien, setSelectedPraticien] = useState<string | null>(null);
   const [praticienDetails, setPraticienDetails] = useState<any[]>([]);
   const [activeStatsTab, setActiveStatsTab] = useState('praticien');
+  const [loading, setLoading] = useState(true);
   const [alerts, setAlerts] = useState<{ type: 'danger' | 'warning' | 'info'; msg: string; id: number }[]>([]);
 
   const [dbData, setDbData] = useState<{
@@ -87,33 +89,43 @@ export function Dashboard() {
         }
 
         let tPatients = 0;
-        let pLabel = "Total Patients (Base)";
+        let pLabel = "Patients consultés ce mois";
         if (dateRange.start && dateRange.end) {
            const patRes = db.exec(`SELECT COUNT(DISTINCT patient_id) FROM appointments WHERE statut = 'Vu' ${whereDateAppt}`, argsAppt);
            tPatients = (patRes.length > 0 && patRes[0].values[0]) ? Number(patRes[0].values[0][0]) : 0;
            pLabel = "Patients consultés";
         } else {
-           tPatients = Number(globalCountRes[0].values[0][0]);
+           const patRes = db.exec(`SELECT COUNT(DISTINCT patient_id) FROM appointments WHERE statut = 'Vu' AND substr(date,1,7) = strftime('%Y-%m','now')`);
+           tPatients = (patRes.length > 0 && patRes[0].values[0]) ? Number(patRes[0].values[0][0]) : 0;
         }
         
-        const actRes = db.exec(`SELECT SUM(montant_acte), SUM(COALESCE(reglement_somme, 0)) FROM clinical_acts WHERE montant_acte > 0 ${whereDateAct}`, argsAct);
         let tProd = 0, tEnc = 0;
-        if (actRes.length > 0 && actRes[0].values[0]) {
-           tProd = Number(actRes[0].values[0][0]) || 0;
-           tEnc = Number(actRes[0].values[0][1]) || 0;
+        if (dateRange.start && dateRange.end) {
+          const actRes = db.exec(`SELECT SUM(montant_acte), SUM(COALESCE(reglement_somme, 0)) FROM financial_entries WHERE 1=1 ${whereDateAct}`, argsAct);
+          if (actRes.length > 0 && actRes[0].values[0]) {
+            tProd = Number(actRes[0].values[0][0]) || 0;
+            tEnc  = Number(actRes[0].values[0][1]) || 0;
+          }
+        } else {
+          // Sans filtre : mois en cours uniquement (pour que la comparaison "vs mois précédent" soit cohérente)
+          const actRes = db.exec(`SELECT SUM(montant_acte), SUM(COALESCE(reglement_somme, 0)) FROM financial_entries WHERE substr(date,1,7) = strftime('%Y-%m','now')`);
+          if (actRes.length > 0 && actRes[0].values[0]) {
+            tProd = Number(actRes[0].values[0][0]) || 0;
+            tEnc  = Number(actRes[0].values[0][1]) || 0;
+          }
         }
         const tauxEncGlobal = tProd > 0 ? Math.round(tEnc * 100 / tProd) : 0;
         const creancesEnCours = Math.max(0, tProd - tEnc);
 
         const cDataRes = db.exec(`
           SELECT
-            substr(date, 1, 7) as mois,
-            SUM(COALESCE(reglement_somme, 0)) as enc,
-            SUM(montant_acte) as prod,
-            ROUND(SUM(COALESCE(reglement_somme, 0)) * 100.0 / NULLIF(SUM(montant_acte), 0), 1) as tauxEnc,
-            (SELECT COUNT(DISTINCT patient_id) FROM appointments WHERE substr(date, 1, 7) = substr(clinical_acts.date, 1, 7) AND statut = 'Vu' ${whereDateAppt}) as pat
-          FROM clinical_acts
-          WHERE date IS NOT NULL AND date != '' ${whereDateAct}
+            substr(fe.date, 1, 7) as mois,
+            SUM(COALESCE(fe.reglement_somme, 0)) as enc,
+            SUM(fe.montant_acte) as prod,
+            ROUND(SUM(COALESCE(fe.reglement_somme, 0)) * 100.0 / NULLIF(SUM(fe.montant_acte), 0), 1) as tauxEnc,
+            (SELECT COUNT(DISTINCT patient_id) FROM appointments WHERE substr(date, 1, 7) = substr(fe.date, 1, 7) AND statut = 'Vu' ${whereDateAppt}) as pat
+          FROM financial_entries fe
+          WHERE fe.date IS NOT NULL AND fe.date != '' ${whereDateAct}
           GROUP BY mois ORDER BY mois ASC LIMIT 12
         `, [...argsAppt, ...argsAct]);
 
@@ -156,10 +168,10 @@ export function Dashboard() {
         }
 
         const pRRes = db.exec(`
-          SELECT 
+          SELECT
             CASE WHEN c.logosw_praticien IS NOT NULL AND c.logosw_praticien != 'NC' THEN c.logosw_praticien ELSE (SELECT praticien FROM appointments a WHERE a.patient_id = c.patient_id AND a.date = c.date LIMIT 1) END as praticien,
             SUM(c.montant_acte) as prod
-          FROM clinical_acts c
+          FROM financial_entries c
           WHERE c.montant_acte > 0 ${whereDateAct}
           GROUP BY praticien
           ORDER BY prod DESC
@@ -196,7 +208,7 @@ export function Dashboard() {
 
         const aRRes = db.exec(`
           SELECT c.libelle, SUM(c.montant_acte) as total
-          FROM clinical_acts c
+          FROM financial_entries c
           WHERE c.type = 'ACTE' AND c.montant_acte > 0 ${whereDateAct}
           GROUP BY c.libelle
           ORDER BY total DESC
@@ -224,7 +236,7 @@ export function Dashboard() {
           const pEnd   = new Date(dateRange.start.getTime() - tzO - 365 * 86400000 + dur).toISOString().split('T')[0];
           compLabel = 'vs même période N-1';
           const prevRes = db.exec(
-            `SELECT SUM(montant_acte), SUM(COALESCE(reglement_somme,0)) FROM clinical_acts WHERE montant_acte > 0 AND date >= ? AND date <= ?`,
+            `SELECT SUM(montant_acte), SUM(COALESCE(reglement_somme,0)) FROM financial_entries WHERE date >= ? AND date <= ?`,
             [pStart, pEnd]
           );
           if (prevRes.length > 0 && prevRes[0].values[0]) {
@@ -234,25 +246,19 @@ export function Dashboard() {
             prevCreances = Math.max(0, prevProd - prevEnc);
           }
         } else {
-          // Dernier mois complet vs mois d'avant
+          // Mois courant vs mois précédent
+          compLabel = 'vs mois précédent';
           const prevRes = db.exec(`
             SELECT
               SUM(CASE WHEN substr(date,1,7) = strftime('%Y-%m', date('now','-1 month')) THEN montant_acte ELSE 0 END),
-              SUM(CASE WHEN substr(date,1,7) = strftime('%Y-%m', date('now','-1 month')) THEN COALESCE(reglement_somme,0) ELSE 0 END),
-              SUM(CASE WHEN substr(date,1,7) = strftime('%Y-%m', date('now','-2 months')) THEN montant_acte ELSE 0 END),
-              SUM(CASE WHEN substr(date,1,7) = strftime('%Y-%m', date('now','-2 months')) THEN COALESCE(reglement_somme,0) ELSE 0 END)
-            FROM clinical_acts WHERE montant_acte > 0
+              SUM(CASE WHEN substr(date,1,7) = strftime('%Y-%m', date('now','-1 month')) THEN COALESCE(reglement_somme,0) ELSE 0 END)
+            FROM financial_entries
           `);
           if (prevRes.length > 0 && prevRes[0].values[0]) {
-            const curMonthProd = Number(prevRes[0].values[0][0]) || 0;
-            prevProd = Number(prevRes[0].values[0][2]) || 0;
-            prevEnc  = Number(prevRes[0].values[0][3]) || 0;
+            prevProd = Number(prevRes[0].values[0][0]) || 0;
+            prevEnc  = Number(prevRes[0].values[0][1]) || 0;
             prevTauxEnc = prevProd > 0 ? Math.round(prevEnc * 100 / prevProd) : 0;
             prevCreances = Math.max(0, prevProd - prevEnc);
-            // Override current stats to last month for comparison context
-            if (curMonthProd > 0) {
-              compLabel = 'vs mois précédent';
-            }
           }
         }
 
@@ -278,6 +284,8 @@ export function Dashboard() {
       }
     } catch (e) {
       console.error("Dashboard error:", e);
+    } finally {
+      setLoading(false);
     }
   }, [dateRange]);
 
@@ -288,7 +296,7 @@ export function Dashboard() {
     try {
       const newAlerts: { type: 'danger' | 'warning' | 'info'; msg: string; id: number }[] = [];
 
-      const encRes = db.exec("SELECT SUM(montant_acte), SUM(COALESCE(reglement_somme, 0)) FROM clinical_acts WHERE montant_acte > 0");
+      const encRes = db.exec("SELECT SUM(montant_acte), SUM(COALESCE(reglement_somme, 0)) FROM financial_entries");
       if (encRes.length > 0 && encRes[0].values[0]) {
         const prod = Number(encRes[0].values[0][0]) || 0;
         const enc = Number(encRes[0].values[0][1]) || 0;
@@ -297,7 +305,31 @@ export function Dashboard() {
         else if (prod > 0 && taux < 85) newAlerts.push({ type: 'warning', msg: `Taux d'encaissement en dessous de l'objectif (85%) : ${taux}%`, id: 2 });
       }
 
-      const anomRes = db.exec(`SELECT COUNT(*) FROM appointments a LEFT JOIN clinical_acts ca ON a.patient_id = ca.patient_id AND a.date = ca.date WHERE a.statut = 'Vu' AND ca.id IS NULL`);
+      const overdueRes = db.exec(`
+        SELECT COUNT(*), COALESCE(SUM(solde), 0) FROM (
+          SELECT
+            SUM(COALESCE(f.montant_acte, 0)) - SUM(COALESCE(f.reglement_somme, 0)) as solde,
+            CAST(julianday('now') - julianday(MIN(CASE WHEN f.montant_acte > 0 THEN f.date END)) AS INTEGER) as jours
+          FROM patients p
+          JOIN financial_entries f ON f.patient_id = p.id
+          GROUP BY p.id
+          HAVING solde > 0.01 AND jours > 30
+        )
+      `);
+      if (overdueRes.length > 0 && overdueRes[0].values[0]) {
+        const nbOverdue = Number(overdueRes[0].values[0][0]) || 0;
+        const totalOverdue = Number(overdueRes[0].values[0][1]) || 0;
+        if (nbOverdue > 0) {
+          const amount = totalOverdue.toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' });
+          newAlerts.push({
+            type: 'danger',
+            msg: `${nbOverdue} créance${nbOverdue > 1 ? 's' : ''} de plus de 30 jours (${amount}) — suivi prioritaire requis`,
+            id: 5,
+          });
+        }
+      }
+
+      const anomRes = db.exec(`SELECT COUNT(*) FROM appointments a LEFT JOIN financial_entries ca ON a.patient_id = ca.patient_id AND a.date = ca.date WHERE a.statut = 'Vu' AND ca.id IS NULL`);
       if (anomRes.length > 0 && anomRes[0].values[0]) {
         const nb = Number(anomRes[0].values[0][0]) || 0;
         if (nb > 10) newAlerts.push({ type: 'warning', msg: `${nb} rendez-vous sans acte associé détectés`, id: 3 });
@@ -346,8 +378,8 @@ export function Dashboard() {
           p.prenom,
           COUNT(a.id) as nb_consult,
           MAX(a.date) as last_date,
-          (SELECT SUM(montant_acte) FROM clinical_acts c WHERE c.patient_id = p.id ${whereDateAct}) as prod,
-          (SELECT SUM(reglement_somme) FROM clinical_acts c WHERE c.patient_id = p.id ${whereDateAct}) as enc
+          (SELECT SUM(montant_acte) FROM financial_entries c WHERE c.patient_id = p.id ${whereDateAct}) as prod,
+          (SELECT SUM(reglement_somme) FROM financial_entries c WHERE c.patient_id = p.id ${whereDateAct}) as enc
         FROM patients p
         JOIN appointments a ON a.patient_id = p.id
         WHERE a.praticien = ? AND a.statut = 'Vu' ${whereDateAppt}
@@ -418,6 +450,8 @@ export function Dashboard() {
       </div>
     );
   };
+
+  if (loading) return <DashboardSkeleton />;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.75rem' }} className="animate-in">

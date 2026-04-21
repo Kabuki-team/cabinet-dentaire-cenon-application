@@ -1,13 +1,17 @@
 import { useState, useEffect } from 'react';
-import { ArrowLeft, Download, Calendar, X, ShieldAlert, FileText, CheckCircle2, MessageSquare } from 'lucide-react';
+import { PatientDetailSkeleton } from '../components/Skeleton';
+import { ArrowLeft, Download, Calendar, X, ShieldAlert, FileText, CheckCircle2, MessageSquare, Edit3, Plus, Trash2, RotateCcw } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { getDB, saveDB } from '../lib/db';
 import { calculateSimilarity } from '../lib/similarity';
 import { formatToFrench } from '../lib/dateUtils';
+import { AdjustmentModal } from '../components/AdjustmentModal';
+import { listAdjustments, softDeleteAdjustment, restoreAdjustment, type ManualAdjustment } from '../lib/adjustments';
 
 export function PatientDetail() {
   const navigate = useNavigate();
   const { id } = useParams();
+  const [loading, setLoading] = useState(true);
   const [showConsultModal, setShowConsultModal] = useState(false);
   const [selectedAct, setSelectedAct] = useState<any>(null);
 
@@ -23,6 +27,17 @@ export function PatientDetail() {
   const [tempID, setTempID] = useState('');
   
   const [suggestion, setSuggestion] = useState<any>(null);
+
+  const [comments, setComments] = useState<Array<{ id: number; content: string; created_at: string; updated_at: string }>>([]);
+  const [newComment, setNewComment] = useState('');
+  const [editingCommentId, setEditingCommentId] = useState<number | null>(null);
+  const [editingContent, setEditingContent] = useState('');
+
+  const [showAdjustmentModal, setShowAdjustmentModal] = useState(false);
+  const [editingAdjustment, setEditingAdjustment] = useState<ManualAdjustment | null>(null);
+  const [deletedAdjustments, setDeletedAdjustments] = useState<ManualAdjustment[]>([]);
+  const [showDeletedAdjustments, setShowDeletedAdjustments] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   const handleExport = () => {
     if (!patient) return;
@@ -56,11 +71,13 @@ export function PatientDetail() {
       </div>
       <h2>Historique des actes</h2>
       <table>
-        <thead><tr><th>Date</th><th>Acte</th><th>Montant</th><th>Réglé</th><th>Source</th></tr></thead>
+        <thead><tr><th>Date</th><th>Acte</th><th>Cotation</th><th>Dents</th><th>Montant</th><th>Réglé</th><th>Source</th></tr></thead>
         <tbody>
           ${acts.map((a: any) => `<tr>
             <td>${a.date || '-'}</td>
             <td>${a.libelle || '-'}</td>
+            <td>${a.type === 'ACTE' ? (a.cotation || 'Non renseigné') : '-'}</td>
+            <td>${a.type === 'ACTE' ? (a.dents || 'Non renseigné') : '-'}</td>
             <td>${Number(a.montant_acte || 0).toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' })}</td>
             <td>${Number(a.reglement_somme || 0).toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' })}</td>
             <td>${a.source || '-'}</td>
@@ -88,10 +105,10 @@ export function PatientDetail() {
       if (pRes.length > 0 && pRes[0].values[0]) {
         const v = pRes[0].values[0];
         
-        // Stats
+        // Stats — inclut actes importés + ajustements manuels via la VIEW.
         const actRes = db.exec(`
           SELECT SUM(montant_acte), SUM(reglement_somme)
-          FROM clinical_acts 
+          FROM financial_entries
           WHERE patient_id = ?
         `, [id]);
         
@@ -125,14 +142,15 @@ export function PatientDetail() {
           pending: prod - enc
         });
 
-        // Historique des actes
+        // Historique des actes (inclut les ajustements manuels actifs via la VIEW financial_entries)
         const hRes = db.exec(`
-          SELECT c.id, c.date, c.libelle, c.montant_acte, c.reglement_somme, c.source, c.type,
-                 c.logosw_praticien,
-                 (SELECT praticien FROM appointments WHERE patient_id = c.patient_id AND date = c.date LIMIT 1) as praticien_appt
-          FROM clinical_acts c
-          WHERE c.patient_id = ?
-          ORDER BY c.date DESC
+          SELECT f.id, f.date, f.libelle, f.montant_acte, f.reglement_somme, f.source, f.type,
+                 f.logosw_praticien,
+                 (SELECT praticien FROM appointments WHERE patient_id = f.patient_id AND date = f.date LIMIT 1) as praticien_appt,
+                 f.is_manual, f.comment, f.updated_at, f.cotation, f.dents
+          FROM financial_entries f
+          WHERE f.patient_id = ?
+          ORDER BY f.date DESC
         `, [id]);
 
         const MAP_PRATICIENS: Record<string, string> = {
@@ -160,6 +178,22 @@ export function PatientDetail() {
            annoRes[0].values.forEach(v => { annoMap[String(v[0])] = { is_dismissed: v[1], comment: v[2] }; });
         }
         setAnnotations(annoMap);
+
+        // Commentaires libres (note de suivi / remarques comptables)
+        const cRes = db.exec(
+          `SELECT id, content, created_at, updated_at FROM patient_comments WHERE patient_id = ? ORDER BY created_at DESC`,
+          [id]
+        );
+        if (cRes.length > 0) {
+          setComments(cRes[0].values.map((row: any) => ({
+            id: Number(row[0]),
+            content: String(row[1]),
+            created_at: String(row[2]),
+            updated_at: String(row[3]),
+          })));
+        } else {
+          setComments([]);
+        }
 
         // Historique des RDV pour anomalies
         const appsRes = db.exec(`SELECT date, heure, praticien, motif FROM appointments WHERE patient_id = ? AND statut = 'Vu' ORDER BY date DESC`, [id]);
@@ -316,17 +350,102 @@ export function PatientDetail() {
               source: act[5],
               type: act[6],
               praticien: resolvePraticien(act[7], act[8]),
-              logosw_praticien: act[7]
+              logosw_praticien: act[7],
+              isManual: Number(act[9]) === 1,
+              comment: act[10] ? String(act[10]) : null,
+              updatedAt: act[11] ? String(act[11]) : null,
+              cotation: act[12] ? String(act[12]) : null,
+              dents: act[13] ? String(act[13]) : null,
             })).filter((act: any) => !(act.montant === 0 && act.reglement === 0)));
          }
+
+         // Ajustements manuels supprimés (corbeille) — permet la restauration
+         const allAdj = listAdjustments(Number(id), true);
+         setDeletedAdjustments(allAdj.filter(a => a.deleted_at !== null));
       } else {
         setNotFound(true);
       }
-    } catch (e) { 
+    } catch (e) {
         console.error("Erreur fiche patient:", e);
         setNotFound(true);
+    } finally {
+        setLoading(false);
     }
-  }, [id]);
+  }, [id, refreshKey]);
+
+  const handleDeleteAdjustment = async (adjId: number) => {
+    if (!window.confirm('Supprimer cet ajustement manuel ? Il sera déplacé dans la corbeille.')) return;
+    await softDeleteAdjustment(adjId);
+    setRefreshKey(k => k + 1);
+  };
+
+  const handleRestoreAdjustment = async (adjId: number) => {
+    const ok = await restoreAdjustment(adjId);
+    if (!ok) {
+      window.alert('Restauration impossible (patient introuvable).');
+      return;
+    }
+    setRefreshKey(k => k + 1);
+  };
+
+  const addComment = async () => {
+    const db = getDB();
+    const content = newComment.trim();
+    if (!db || !id || !content) return;
+    db.run("INSERT INTO patient_comments (patient_id, content) VALUES (?, ?)", [id, content]);
+    await saveDB();
+    const res = db.exec(
+      `SELECT id, content, created_at, updated_at FROM patient_comments WHERE patient_id = ? ORDER BY created_at DESC`,
+      [id]
+    );
+    if (res.length > 0) {
+      setComments(res[0].values.map((row: any) => ({
+        id: Number(row[0]),
+        content: String(row[1]),
+        created_at: String(row[2]),
+        updated_at: String(row[3]),
+      })));
+    }
+    setNewComment('');
+  };
+
+  const updateComment = async (commentId: number) => {
+    const db = getDB();
+    const content = editingContent.trim();
+    if (!db || !id || !content) return;
+    db.run(
+      "UPDATE patient_comments SET content = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND patient_id = ?",
+      [content, commentId, id]
+    );
+    await saveDB();
+    const res = db.exec(
+      `SELECT id, content, created_at, updated_at FROM patient_comments WHERE patient_id = ? ORDER BY created_at DESC`,
+      [id]
+    );
+    if (res.length > 0) {
+      setComments(res[0].values.map((row: any) => ({
+        id: Number(row[0]),
+        content: String(row[1]),
+        created_at: String(row[2]),
+        updated_at: String(row[3]),
+      })));
+    }
+    setEditingCommentId(null);
+    setEditingContent('');
+  };
+
+  const deleteComment = async (commentId: number) => {
+    const db = getDB();
+    if (!db || !id) return;
+    if (!window.confirm('Supprimer ce commentaire ?')) return;
+    db.run("DELETE FROM patient_comments WHERE id = ? AND patient_id = ?", [commentId, id]);
+    await saveDB();
+    setComments(prev => prev.filter(c => c.id !== commentId));
+    if (editingCommentId === commentId) {
+      setEditingCommentId(null);
+      setEditingContent('');
+    }
+  };
 
   const saveAnnotation = async () => {
     const db = getDB();
@@ -369,6 +488,8 @@ export function PatientDetail() {
       </div>
     );
   }
+
+  if (loading) return <PatientDetailSkeleton />;
 
   if (!patient) {
      return <div style={{ padding: '2rem', textAlign: 'center' }}>Chargement de la fiche patient...</div>;
@@ -520,12 +641,114 @@ export function PatientDetail() {
               </div>
             </div>
           </div>
+
+          <div className="card">
+            <h3 style={{ fontSize: '1.125rem', fontWeight: 600, marginBottom: '1rem', borderBottom: '1px solid var(--border)', paddingBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <MessageSquare size={18} /> Commentaires
+            </h3>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '1rem' }}>
+              <textarea
+                className="input"
+                placeholder="Ajouter un commentaire…"
+                rows={3}
+                value={newComment}
+                onChange={(e) => setNewComment(e.target.value)}
+              />
+              <button
+                className="btn btn-primary"
+                disabled={!newComment.trim()}
+                onClick={addComment}
+                style={{ alignSelf: 'flex-end' }}
+              >
+                Ajouter
+              </button>
+            </div>
+
+            {comments.length === 0 ? (
+              <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)', textAlign: 'center', padding: '0.75rem 0' }}>
+                Aucun commentaire.
+              </p>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', maxHeight: '320px', overflowY: 'auto' }}>
+                {comments.map((c) => (
+                  <div key={c.id} style={{ padding: '0.75rem', backgroundColor: 'var(--bg)', borderRadius: '0.5rem', border: '1px solid var(--border)' }}>
+                    {editingCommentId === c.id ? (
+                      <>
+                        <textarea
+                          className="input"
+                          rows={3}
+                          value={editingContent}
+                          onChange={(e) => setEditingContent(e.target.value)}
+                        />
+                        <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', marginTop: '0.5rem' }}>
+                          <button className="btn btn-ghost" onClick={() => { setEditingCommentId(null); setEditingContent(''); }}>Annuler</button>
+                          <button
+                            className="btn btn-primary"
+                            disabled={!editingContent.trim()}
+                            onClick={() => updateComment(c.id)}
+                          >
+                            Enregistrer
+                          </button>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <p style={{ fontSize: '0.875rem', whiteSpace: 'pre-wrap', margin: 0 }}>{c.content}</p>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.5rem' }}>
+                          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                            {new Date(c.created_at + 'Z').toLocaleString('fr-FR')}
+                            {c.updated_at !== c.created_at && ' · modifié'}
+                          </span>
+                          <div style={{ display: 'flex', gap: '0.25rem' }}>
+                            <button
+                              className="btn btn-ghost"
+                              style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}
+                              onClick={() => { setEditingCommentId(c.id); setEditingContent(c.content); }}
+                            >
+                              Modifier
+                            </button>
+                            <button
+                              className="btn btn-ghost"
+                              style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem', color: 'var(--danger-text)' }}
+                              onClick={() => deleteComment(c.id)}
+                            >
+                              Supprimer
+                            </button>
+                          </div>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Colonne Historique */}
         <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '1rem', padding: 0 }}>
-          <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid var(--border)' }}>
+          <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
             <h3 style={{ fontSize: '1.125rem', fontWeight: 600 }}>Historique des actes & règlements</h3>
+            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+              {deletedAdjustments.length > 0 && (
+                <button
+                  className="btn btn-ghost"
+                  style={{ padding: '0.25rem 0.6rem', fontSize: '0.75rem', color: 'var(--text-muted)' }}
+                  onClick={() => setShowDeletedAdjustments(v => !v)}
+                >
+                  {showDeletedAdjustments ? 'Masquer' : 'Afficher'} corbeille ({deletedAdjustments.length})
+                </button>
+              )}
+              <button
+                className="btn btn-primary"
+                style={{ padding: '0.35rem 0.75rem', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}
+                onClick={() => { setEditingAdjustment(null); setShowAdjustmentModal(true); }}
+              >
+                <Plus size={14} />
+                Ajouter un ajustement
+              </button>
+            </div>
           </div>
           
           <div style={{ display: 'flex', flexDirection: 'column', padding: '0 1.5rem 1.5rem 1.5rem', maxHeight: '600px', overflowY: 'auto' }}>
@@ -580,24 +803,133 @@ export function PatientDetail() {
                          </div>
                        );
                     }
+                    const isManual = !!item.isManual;
+                    const accentColor = isManual
+                      ? '#7c3aed'
+                      : (item.type === 'REGLEMENT' ? 'var(--success-bg)' : 'var(--warning-bg)');
                     return (
-                      <div key={j} style={{ display: 'flex', gap: '1rem', padding: '1rem', backgroundColor: 'var(--bg)', borderRadius: '0.5rem', cursor: 'pointer', border: '1px solid var(--border)' }} onClick={() => { setSelectedAct(item); setShowConsultModal(true); }}>
-                        <div style={{ width: '4px', backgroundColor: item.type === 'REGLEMENT' ? 'var(--success-bg)' : 'var(--warning-bg)', borderRadius: '2px' }}></div>
+                      <div
+                        key={j}
+                        style={{
+                          display: 'flex',
+                          gap: '1rem',
+                          padding: '1rem',
+                          backgroundColor: isManual ? '#f5f3ff' : 'var(--bg)',
+                          borderRadius: '0.5rem',
+                          cursor: isManual ? 'default' : 'pointer',
+                          border: isManual ? '1px solid #ddd6fe' : '1px solid var(--border)',
+                        }}
+                        onClick={isManual ? undefined : () => { setSelectedAct(item); setShowConsultModal(true); }}
+                      >
+                        <div style={{ width: '4px', backgroundColor: accentColor, borderRadius: '2px' }}></div>
                         <div style={{ flex: 1 }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.25rem' }}>
-                            <h4 style={{ fontWeight: 600, fontSize: '0.95rem' }}>{item.libelle || 'Acte'}</h4>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.25rem', gap: '0.5rem' }}>
+                            <h4 style={{ fontWeight: 600, fontSize: '0.95rem', display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                              {item.libelle || 'Acte'}
+                              {isManual && (
+                                <span
+                                  className="badge"
+                                  style={{
+                                    fontSize: '0.65rem',
+                                    padding: '0.1rem 0.5rem',
+                                    borderRadius: '9999px',
+                                    backgroundColor: '#ede9fe',
+                                    color: '#6d28d9',
+                                    fontWeight: 600,
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '0.25rem',
+                                  }}
+                                >
+                                  <Edit3 size={10} />
+                                  Ajusté manuellement
+                                </span>
+                              )}
+                            </h4>
                             <span style={{ fontWeight: 600, color: item.type === 'REGLEMENT' ? 'var(--success-text)' : 'var(--text)' }}>
                               {(item.type === 'REGLEMENT' ? item.reglement : item.montant).toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' })}
                             </span>
                           </div>
-                          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                            <span style={{ fontSize: '0.875rem', color: 'var(--text-muted)' }}>{item.type === 'REGLEMENT' ? 'Paiement' : 'Prestation'}</span>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                              <span style={{ fontSize: '0.875rem', color: 'var(--text-muted)' }}>{item.type === 'REGLEMENT' ? 'Paiement' : 'Prestation'}</span>
+                              {!isManual && item.type === 'ACTE' && (
+                                <span
+                                  className="badge"
+                                  title="Cotation LogosW"
+                                  style={{
+                                    fontSize: '0.7rem',
+                                    padding: '0.1rem 0.5rem',
+                                    borderRadius: '9999px',
+                                    backgroundColor: item.cotation ? 'var(--info-bg)' : 'var(--bg)',
+                                    color: item.cotation ? 'var(--info-text)' : 'var(--text-muted)',
+                                    fontWeight: 500,
+                                    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                                    border: '1px solid var(--border)',
+                                  }}
+                                >
+                                  Cotation : {item.cotation || 'Non renseigné'}
+                                </span>
+                              )}
+                              {!isManual && item.type === 'ACTE' && (
+                                <span
+                                  className="badge"
+                                  title="Dent(s) concernée(s)"
+                                  style={{
+                                    fontSize: '0.7rem',
+                                    padding: '0.1rem 0.5rem',
+                                    borderRadius: '9999px',
+                                    backgroundColor: item.dents ? 'var(--info-bg)' : 'var(--bg)',
+                                    color: item.dents ? 'var(--info-text)' : 'var(--text-muted)',
+                                    fontWeight: 500,
+                                    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                                    border: '1px solid var(--border)',
+                                  }}
+                                >
+                                  Dents : {item.dents || 'Non renseigné'}
+                                </span>
+                              )}
+                            </div>
                             <span style={{ fontSize: '0.875rem', color: item.type === 'REGLEMENT' ? 'var(--success-text)' : (item.reglement >= item.montant ? 'var(--success-text)' : 'var(--warning-text)'), fontWeight: 500 }}>
                                {item.type === 'REGLEMENT' ? 'Encaissé' : (item.reglement >= item.montant ? 'Réglé' : '')}
                             </span>
                           </div>
-                          <div style={{ marginTop: '0.5rem', fontSize: '0.75rem', color: 'var(--info-text)', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-                            <ShieldAlert size={12} /> Source: {item.source}
+                          {isManual && item.comment && (
+                            <div style={{ marginTop: '0.5rem', padding: '0.5rem 0.75rem', backgroundColor: 'rgba(124,58,237,0.08)', borderRadius: '4px', fontSize: '0.75rem', fontStyle: 'italic', color: '#5b21b6' }}>
+                              « {item.comment} »
+                            </div>
+                          )}
+                          <div style={{ marginTop: '0.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                            <div style={{ fontSize: '0.75rem', color: isManual ? '#6d28d9' : 'var(--info-text)', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                              {isManual ? <Edit3 size={12} /> : <ShieldAlert size={12} />}
+                              Source : {isManual ? 'Saisie manuelle' : item.source}
+                              {isManual && item.updatedAt && (
+                                <span style={{ marginLeft: '0.5rem', opacity: 0.75 }}>
+                                  · {new Date(String(item.updatedAt) + 'Z').toLocaleString('fr-FR')}
+                                </span>
+                              )}
+                            </div>
+                            {isManual && (
+                              <div style={{ display: 'flex', gap: '0.25rem' }} onClick={(e) => e.stopPropagation()}>
+                                <button
+                                  className="btn btn-ghost"
+                                  style={{ padding: '0.2rem 0.5rem', fontSize: '0.72rem', color: '#6d28d9' }}
+                                  onClick={() => {
+                                    const existing = listAdjustments(Number(id)).find(a => a.id === item.id);
+                                    if (existing) { setEditingAdjustment(existing); setShowAdjustmentModal(true); }
+                                  }}
+                                >
+                                  Modifier
+                                </button>
+                                <button
+                                  className="btn btn-ghost"
+                                  style={{ padding: '0.2rem 0.5rem', fontSize: '0.72rem', color: 'var(--danger-text)' }}
+                                  onClick={() => handleDeleteAdjustment(Number(item.id))}
+                                >
+                                  <Trash2 size={12} />
+                                </button>
+                              </div>
+                            )}
                           </div>
                         </div>
                       </div>
@@ -606,9 +938,51 @@ export function PatientDetail() {
                 </div>
               </div>
             ))}
+
+            {showDeletedAdjustments && deletedAdjustments.length > 0 && (
+              <div style={{ marginTop: '1rem', padding: '1rem', borderTop: '1px dashed var(--border)' }}>
+                <h4 style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                  <Trash2 size={14} /> Corbeille — ajustements supprimés
+                </h4>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                  {deletedAdjustments.map(adj => (
+                    <div key={adj.id} style={{ display: 'flex', gap: '0.75rem', padding: '0.75rem', backgroundColor: 'var(--bg)', borderRadius: '0.5rem', border: '1px dashed var(--border)', opacity: 0.75 }}>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.5rem', fontSize: '0.8rem' }}>
+                          <span style={{ fontWeight: 500, textDecoration: 'line-through' }}>{adj.libelle}</span>
+                          <span style={{ fontWeight: 600, textDecoration: 'line-through' }}>
+                            {(adj.type === 'REGLEMENT' ? adj.reglement_somme : adj.montant_acte).toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' })}
+                          </span>
+                        </div>
+                        <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
+                          {formatToFrench(adj.date)} · supprimé le {adj.deleted_at ? new Date(adj.deleted_at + 'Z').toLocaleString('fr-FR') : '—'}
+                        </div>
+                      </div>
+                      <button
+                        className="btn btn-ghost"
+                        style={{ padding: '0.25rem 0.5rem', fontSize: '0.72rem', display: 'flex', alignItems: 'center', gap: '0.25rem', color: 'var(--primary)' }}
+                        onClick={() => handleRestoreAdjustment(adj.id)}
+                      >
+                        <RotateCcw size={12} /> Restaurer
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>
+
+      {showAdjustmentModal && patient && (
+        <AdjustmentModal
+          patientId={Number(id)}
+          patientName={patient.name}
+          existing={editingAdjustment}
+          onClose={() => { setShowAdjustmentModal(false); setEditingAdjustment(null); }}
+          onSaved={() => setRefreshKey(k => k + 1)}
+        />
+      )}
 
       {showConsultModal && selectedAct && (
         <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'flex-start', justifyContent: 'flex-end', zIndex: 50 }}>
@@ -641,6 +1015,16 @@ export function PatientDetail() {
                     <span style={{ fontWeight: 500 }}>{selectedAct.libelle}</span>
                   </div>
                   <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Type: {selectedAct.type}</div>
+                  {selectedAct.type === 'ACTE' && (
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.15rem', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}>
+                      Cotation : {selectedAct.cotation || 'Non renseigné'}
+                    </div>
+                  )}
+                  {selectedAct.type === 'ACTE' && (
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.15rem', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}>
+                      Dents : {selectedAct.dents || 'Non renseigné'}
+                    </div>
+                  )}
                 </div>
               </div>
               <div>

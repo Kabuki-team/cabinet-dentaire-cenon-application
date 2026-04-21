@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { RevenuesSkeleton } from '../components/Skeleton';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, ResponsiveContainer, Legend, PieChart, Pie, Cell, Tooltip, ComposedChart, Line } from 'recharts';
 import { Download } from 'lucide-react';
 import { DateRangePicker } from '../components/DateRangePicker';
@@ -11,6 +12,7 @@ export function Revenues() {
   const [activeTab, setActiveTab] = useState<'praticien' | 'acte' | 'evolution'>('praticien');
   const [dateRange, setDateRange] = useState<{start: Date | null, end: Date | null}>({ start: null, end: null });
 
+  const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState({ prod: 0, enc: 0, avgBasket: 0, patients: 0 });
   const [prevStats, setPrevStats] = useState({ prod: 0, enc: 0, avgBasket: 0, compLabel: 'vs période précédente' });
   const [objectifMensuel, setObjectifMensuel] = useState<number>(() => {
@@ -43,14 +45,18 @@ export function Revenues() {
          args.push(sd, ed);
       }
 
-      // Globals
+      // Globals — mois courant si pas de filtre, sinon période sélectionnée.
+      // Utilise la VIEW financial_entries pour inclure les ajustements manuels.
+      const gWhere = dateRange.start && dateRange.end
+        ? `WHERE 1=1 ${whereDateAct}`
+        : `WHERE substr(c.date,1,7) = strftime('%Y-%m','now')`;
       const gRes = db.exec(`
-        SELECT 
-          SUM(c.montant_acte) as prod, 
+        SELECT
+          SUM(c.montant_acte) as prod,
           SUM(c.reglement_somme) as enc,
           COUNT(DISTINCT c.patient_id) as patients
-        FROM clinical_acts c
-        WHERE 1=1 ${whereDateAct}
+        FROM financial_entries c
+        ${gWhere}
       `, args);
 
       let prod = 0, enc = 0, patients = 0;
@@ -72,7 +78,7 @@ export function Revenues() {
         const pEnd   = new Date(dateRange.start.getTime() - tzO - 365 * 86400000 + dur).toISOString().split('T')[0];
         compLabel = 'vs même période N-1';
         const prevRes = db.exec(
-          `SELECT SUM(montant_acte), SUM(COALESCE(reglement_somme,0)), COUNT(DISTINCT patient_id) FROM clinical_acts WHERE montant_acte > 0 AND date >= ? AND date <= ?`,
+          `SELECT SUM(montant_acte), SUM(COALESCE(reglement_somme,0)), COUNT(DISTINCT patient_id) FROM financial_entries WHERE date >= ? AND date <= ?`,
           [pStart, pEnd]
         );
         if (prevRes.length > 0 && prevRes[0].values[0]) {
@@ -84,10 +90,11 @@ export function Revenues() {
         compLabel = 'vs mois précédent';
         const prevRes = db.exec(`
           SELECT
-            SUM(CASE WHEN substr(date,1,7) = strftime('%Y-%m', date('now','-2 months')) THEN montant_acte ELSE 0 END),
-            SUM(CASE WHEN substr(date,1,7) = strftime('%Y-%m', date('now','-2 months')) THEN COALESCE(reglement_somme,0) ELSE 0 END),
-            COUNT(DISTINCT CASE WHEN substr(date,1,7) = strftime('%Y-%m', date('now','-2 months')) THEN patient_id END)
-          FROM clinical_acts WHERE montant_acte > 0
+            SUM(montant_acte),
+            SUM(COALESCE(reglement_somme,0)),
+            COUNT(DISTINCT patient_id)
+          FROM financial_entries
+          WHERE substr(date,1,7) = strftime('%Y-%m', date('now','-1 month'))
         `);
         if (prevRes.length > 0 && prevRes[0].values[0]) {
           prevProd     = Number(prevRes[0].values[0][0]) || 0;
@@ -112,11 +119,11 @@ export function Revenues() {
           SUM(c.montant_acte) as prod,
           SUM(COALESCE(c.reglement_somme, 0)) as enc,
           COUNT(DISTINCT c.patient_id) as nb_patients
-        FROM clinical_acts c
-        WHERE c.montant_acte > 0 ${whereDateAct}
+        FROM financial_entries c
+        WHERE ${dateRange.start && dateRange.end ? `1=1 ${whereDateAct}` : `substr(c.date,1,7) = strftime('%Y-%m','now')`}
         GROUP BY praticien
         ORDER BY prod DESC
-      `, args);
+      `, dateRange.start && dateRange.end ? args : []);
 
       if (pRes.length > 0) {
         const mapNames: Record<string, string> = {
@@ -159,8 +166,8 @@ export function Revenues() {
           SUM(COALESCE(reglement_somme, 0)) as enc,
           SUM(montant_acte) as prod,
           ROUND(SUM(COALESCE(reglement_somme, 0)) * 100.0 / NULLIF(SUM(montant_acte), 0), 1) as tauxEnc
-        FROM clinical_acts
-        WHERE date IS NOT NULL AND date != '' AND montant_acte > 0
+        FROM financial_entries
+        WHERE date IS NOT NULL AND date != ''
         GROUP BY mois ORDER BY mois ASC LIMIT 12
       `);
       if (evoRes.length > 0) {
@@ -177,10 +184,10 @@ export function Revenues() {
         setDataEvolution([]);
       }
 
-      // Actes (Top 5)
+      // Actes (Top 5) — inclut les ajustements manuels de type ACTE
       const aRes = db.exec(`
         SELECT c.libelle, SUM(c.montant_acte) as total
-        FROM clinical_acts c
+        FROM financial_entries c
         WHERE c.type = 'ACTE' AND c.montant_acte > 0 ${whereDateAct}
         GROUP BY c.libelle
         ORDER BY total DESC
@@ -199,6 +206,8 @@ export function Revenues() {
 
     } catch (e) {
       console.error(e);
+    } finally {
+      setLoading(false);
     }
   }, [dateRange]);
 
@@ -216,6 +225,8 @@ export function Revenues() {
       </div>
     );
   };
+
+  if (loading) return <RevenuesSkeleton />;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.75rem' }} className="animate-in">

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { DateRangePicker } from '../components/DateRangePicker';
 import { getDB } from '../lib/db';
 import { useNavigate } from 'react-router-dom';
+import { TablePageSkeleton } from '../components/Skeleton';
 
 const DAY_LABELS = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
 
@@ -27,6 +28,7 @@ function formatShortDate(isoDate: string): string {
 export function Activity() {
   const _today = new Date();
   const _todayISO = `${_today.getFullYear()}-${String(_today.getMonth() + 1).padStart(2, '0')}-${String(_today.getDate()).padStart(2, '0')}`;
+  const [loading, setLoading] = useState(true);
   const [selectedDate, setSelectedDate] = useState<string>(_todayISO);
   const [viewMode, setViewMode] = useState<'jour' | 'semaine'>('jour');
   const [data, setData] = useState<any[]>([]);
@@ -50,7 +52,7 @@ export function Activity() {
       const actesRes = db.exec(`
         SELECT
           ca.id, ca.date, p.nom, p.prenom, ca.logosw_praticien, ca.libelle, ca.montant_acte, ca.reglement_somme, ca.type, ca.source, p.id as pId
-        FROM clinical_acts ca
+        FROM financial_entries ca
         JOIN patients p ON ca.patient_id = p.id
         WHERE ca.date = ?
       `, [date]);
@@ -165,6 +167,8 @@ export function Activity() {
       setData(finalData);
     } catch (e) {
       console.error(e);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -182,7 +186,7 @@ export function Activity() {
           `SELECT COUNT(*) FROM appointments WHERE date = ? AND statut = 'Vu'`, [d]
         );
         const actRes = db.exec(
-          `SELECT SUM(montant_acte), SUM(COALESCE(reglement_somme,0)) FROM clinical_acts WHERE date = ? AND montant_acte > 0`, [d]
+          `SELECT SUM(montant_acte), SUM(COALESCE(reglement_somme,0)) FROM financial_entries WHERE date = ?`, [d]
         );
         const vus = rdvRes.length > 0 && rdvRes[0].values[0] ? Number(rdvRes[0].values[0][0]) || 0 : 0;
         const prod = actRes.length > 0 && actRes[0].values[0] ? Number(actRes[0].values[0][0]) || 0 : 0;
@@ -192,6 +196,8 @@ export function Activity() {
       setWeekData(results);
     } catch (e) {
       console.error(e);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -205,6 +211,8 @@ export function Activity() {
   };
 
   const weekMax = weekData.reduce((m, d) => Math.max(m, d.prod), 1);
+
+  if (loading) return <TablePageSkeleton cols={5} />;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>

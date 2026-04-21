@@ -182,13 +182,16 @@ export function Imports() {
      
      setErrorMsg(null);
      setLoading(prev => ({ ...prev, global: true }));
-     
+     // Yield to the event loop so React can re-render (show loader) before blocking sync SQL work
+     await new Promise(resolve => setTimeout(resolve, 50));
+
      const importId = 'IMP-' + Date.now().toString() + Math.floor(Math.random()*1000).toString();
 
      db.run("BEGIN TRANSACTION");
      try {
        // --- MIGRATION: Normaliser TOUTES les dates de naissance existantes en ISO ---
        setProgress("Normalisation des dates de naissance...");
+       await new Promise(resolve => setTimeout(resolve, 0));
        const allDobs = db.exec("SELECT id, date_naissance FROM patients WHERE date_naissance IS NOT NULL AND date_naissance != ''");
        if (allDobs.length > 0) {
          let fixed = 0;
@@ -246,6 +249,7 @@ export function Imports() {
 
        // 1. DOCTOLIB
        setProgress("Génération des fiches patients...");
+       await new Promise(resolve => setTimeout(resolve, 0));
        for (const row of rawData.doctolib) {
          const pIdExRaw = getMappedValue(row, "Doctolib Patient ID");
          if (!pIdExRaw) continue;
@@ -288,6 +292,7 @@ export function Imports() {
 
        // 2. LOGOSW
        setProgress("Analyse des flux financiers LogosW...");
+       await new Promise(resolve => setTimeout(resolve, 0));
        const LOGOSW_BLACKLIST = ['total', 'honoraires', 'reglement', 'réglement', 'règlement', 'logosw', 'grand total'];
        
        // Indexation du dictionnaire et sauvegarde persistante
@@ -502,12 +507,17 @@ export function Imports() {
          
          const typeAct = (isReglementStr || reglementSomme > 0) ? 'REGLEMENT' : 'ACTE';
          const logoswPraticien = String(getMappedValue(row, "Praticien") || "").trim() || "NC";
+         const cotationRaw = String(getMappedValue(row, "Cotation") || "").trim();
+         const cotation = cotationRaw.length > 0 ? cotationRaw : null;
+         const dentsRaw = String(getMappedValue(row, "Dt") || "").trim();
+         const dents = dentsRaw.length > 0 ? dentsRaw : null;
 
-         db.run(`INSERT INTO clinical_acts (patient_id, date, libelle, montant_acte, reglement_somme, type, source, logosw_praticien, import_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-                [pId, visitDate, rawActe, montantActe, reglementSomme, typeAct, "LogosW", logoswPraticien, importId]);
+         db.run(`INSERT INTO clinical_acts (patient_id, date, libelle, montant_acte, reglement_somme, type, source, logosw_praticien, cotation, dents, import_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                [pId, visitDate, rawActe, montantActe, reglementSomme, typeAct, "LogosW", logoswPraticien, cotation, dents, importId]);
        }
        // === PASSE DE RÉCONCILIATION FINALE ===
        setProgress("Réconciliation finale des identités...");
+       await new Promise(resolve => setTimeout(resolve, 0));
        if (rawData.logosw_patients && rawData.logosw_patients.length > 0) {
           console.group("🔍 Passe de réconciliation finale");
           
