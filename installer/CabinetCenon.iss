@@ -39,8 +39,6 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=admin
 PrivilegesRequiredOverridesAllowed=dialog
-CloseApplications=no
-RestartApplicationsAfterInstall=no
 UninstallDisplayIcon={app}\favicon.ico
 WizardImageStretch=no
 ; Fichier de licence affiché au 1er écran (facultatif — créer installer/LICENSE.txt si on veut)
