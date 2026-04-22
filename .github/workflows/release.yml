@@ -157,7 +157,7 @@ jobs:
           $ver = "${{ env.NODE_PORTABLE_VERSION }}"
           $url = "https://nodejs.org/dist/v$ver/node-v$ver-win-x64.zip"
           Write-Host "Download : $url"
-          Invoke-WebRequest -Uri $url -OutFile node.zip -UseBasicParsing
+          Invoke-WebRequest -Uri $url -OutFile node.zip -UseBasicParsing -MaximumRetryCount 5 -RetryIntervalSec 10
           Expand-Archive node.zip -DestinationPath node-tmp
           New-Item -ItemType Directory -Force -Path installer\bundle\node | Out-Null
           # Node.js zip contient un dossier node-vX.Y.Z-win-x64/ → on aplatit
@@ -169,21 +169,30 @@ jobs:
             Remove-Item -Force -ErrorAction SilentlyContinue
           Remove-Item node.zip, node-tmp -Recurse -Force
 
-      - name: Télécharger NSSM ${{ env.NSSM_VERSION }}
+      - name: Installer NSSM via Chocolatey (plus fiable que nssm.cc qui peut renvoyer 503)
         shell: pwsh
         run: |
-          $url = "https://nssm.cc/release/nssm-${{ env.NSSM_VERSION }}.zip"
-          Invoke-WebRequest -Uri $url -OutFile nssm.zip -UseBasicParsing
-          Expand-Archive nssm.zip -DestinationPath nssm-tmp
+          choco install nssm -y --no-progress
+          if ($LASTEXITCODE -ne 0) { throw "choco install nssm a échoué" }
+          # Chocolatey installe nssm.exe dans C:\ProgramData\chocolatey\lib\NSSM\tools\, versions win32 et win64
+          $nssmSrc = Get-ChildItem 'C:\ProgramData\chocolatey\lib\NSSM' -Filter 'nssm.exe' -Recurse |
+                     Where-Object { $_.FullName -match 'win64' } |
+                     Select-Object -First 1 -ExpandProperty FullName
+          if (-not $nssmSrc) {
+            # Fallback : version non suffixée (certains packages n'ont que win64)
+            $nssmSrc = Get-ChildItem 'C:\ProgramData\chocolatey\lib\NSSM' -Filter 'nssm.exe' -Recurse |
+                       Select-Object -First 1 -ExpandProperty FullName
+          }
+          if (-not $nssmSrc) { throw "nssm.exe introuvable après install chocolatey" }
           New-Item -ItemType Directory -Force -Path installer\bundle\bin | Out-Null
-          Copy-Item (Get-ChildItem nssm-tmp -Recurse -Filter 'nssm.exe' | Where-Object { $_.FullName -match 'win64' } | Select-Object -First 1).FullName installer\bundle\bin\nssm.exe -Force
-          Remove-Item nssm.zip, nssm-tmp -Recurse -Force
+          Copy-Item $nssmSrc installer\bundle\bin\nssm.exe -Force
+          Write-Host "NSSM copié depuis $nssmSrc"
 
       - name: Télécharger SQLite CLI (pour backup VACUUM INTO)
         shell: pwsh
         run: |
           $url = "${{ env.SQLITE_URL }}"
-          Invoke-WebRequest -Uri $url -OutFile sqlite.zip -UseBasicParsing
+          Invoke-WebRequest -Uri $url -OutFile sqlite.zip -UseBasicParsing -MaximumRetryCount 5 -RetryIntervalSec 10
           Expand-Archive sqlite.zip -DestinationPath sqlite-tmp
           Copy-Item (Get-ChildItem sqlite-tmp -Recurse -Filter 'sqlite3.exe' | Select-Object -First 1).FullName installer\bundle\bin\sqlite3.exe -Force
           Remove-Item sqlite.zip, sqlite-tmp -Recurse -Force
