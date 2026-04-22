@@ -259,3 +259,99 @@ jobs:
             Vérifier le checksum SHA-256 : comparer avec le fichier `.sha256` joint.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ---------------------------------------------------------------------------
+  # Job 3 : installeur macOS (.pkg) pour Mac utilisé comme serveur cabinet.
+  # Matrix arm64 (Apple Silicon) + x64 (Intel). Produit CabinetCenon-<ver>-<arch>.pkg.
+  # Les postes cabinet restent en navigateur, comme sur Windows.
+  # ---------------------------------------------------------------------------
+  build-installer-macos:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-latest    # Apple Silicon (M1/M2/M3/M4...)
+          - arch: x64
+            runner: macos-13        # Dernier runner Intel supporté
+    runs-on: ${{ matrix.runner }}
+    needs: []
+    env:
+      NODE_VERSION: '22.11.0'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract tag version
+        id: version
+        shell: bash
+        run: |
+          REF="${{ github.ref_name }}"
+          if [[ "$REF" == v* ]]; then
+            echo "version=${REF#v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=0.0.0-${REF//\//-}-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Vérifier secret VITE_OFFICE_TOKEN
+        shell: bash
+        env:
+          TOKEN: ${{ secrets.VITE_OFFICE_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ] || [ ${#TOKEN} -lt 32 ]; then
+            echo "::error::VITE_OFFICE_TOKEN manquant ou trop court."
+            exit 1
+          fi
+
+      - name: Build frontend (token baké pour same-origin)
+        env:
+          VITE_OFFICE_TOKEN: ${{ secrets.VITE_OFFICE_TOKEN }}
+          VITE_SERVER_URL: ''
+        run: |
+          npm install --no-audit --no-fund
+          npm run build
+
+      - name: Build backend
+        run: |
+          cd server
+          npm install --no-audit --no-fund
+          npm run build
+
+      - name: Construire le .pkg macOS
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          OFFICE_TOKEN: ${{ secrets.VITE_OFFICE_TOKEN }}
+          ARCH: ${{ matrix.arch }}
+          NODE_VERSION: ${{ env.NODE_VERSION }}
+        run: |
+          chmod +x installer-macos/build-pkg.sh
+          installer-macos/build-pkg.sh
+
+      - name: Upload artefacts (workflow_dispatch debug)
+        uses: actions/upload-artifact@v4
+        with:
+          name: installer-macos-${{ matrix.arch }}-${{ steps.version.outputs.version }}
+          path: |
+            installer-macos/output/*.pkg
+            installer-macos/output/*.sha256
+          retention-days: 30
+
+      - name: Publier dans la Release GitHub (tag v*)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: 'Cabinet Dentaire Cenon ${{ github.ref_name }}'
+          draft: true
+          fail_on_unmatched_files: true
+          files: |
+            installer-macos/output/*.pkg
+            installer-macos/output/*.sha256
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

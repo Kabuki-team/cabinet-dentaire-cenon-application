@@ -61,11 +61,13 @@ Source: "bundle\server\*";  DestDir: "{app}\server";  Flags: recursesubdirs igno
 Source: "bundle\dist\*";    DestDir: "{app}\dist";    Flags: recursesubdirs ignoreversion
 
 ; Scripts PS1 d'install/uninstall appelés ci-dessous.
-Source: "silent-install.ps1";   DestDir: "{app}\installer"; Flags: ignoreversion
-Source: "silent-uninstall.ps1"; DestDir: "{app}\installer"; Flags: ignoreversion
+; Utilise {#SourcePath} (dir du .iss résolu à la compile) pour éviter toute
+; ambiguïté sur le chemin selon d'où iscc est lancé.
+Source: "{#SourcePath}silent-install.ps1";   DestDir: "{app}\installer"; Flags: ignoreversion
+Source: "{#SourcePath}silent-uninstall.ps1"; DestDir: "{app}\installer"; Flags: ignoreversion
 
 ; Icône raccourci optionnelle
-Source: "bundle\favicon.ico"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "{#SourcePath}bundle\favicon.ico"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 
 [Dirs]
 Name: "{app}\data";    Permissions: users-modify

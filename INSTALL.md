@@ -4,6 +4,16 @@ Guide pour le **PC serveur du secrétariat**. Les 4 postes cabinet n'ont rien à
 
 Durée : **15 minutes**.
 
+## Choisir la bonne version selon l'OS du serveur
+
+| OS du PC serveur | Fichier à télécharger |
+|---|---|
+| Windows 11 (le plus courant) | `CabinetCenon-Setup-<version>.exe` — lire ci-dessous |
+| macOS Apple Silicon (M1/M2/M3/M4) | `CabinetCenon-<version>-arm64.pkg` — voir [§ macOS](#installation-sur-mac-serveur) |
+| macOS Intel | `CabinetCenon-<version>-x64.pkg` — voir [§ macOS](#installation-sur-mac-serveur) |
+
+Les 4 postes cabinet peuvent tourner sur n'importe quel OS (Windows, macOS, Linux, Chromebook) — seul le navigateur compte.
+
 ---
 
 ## 1. Télécharger l'installeur
@@ -126,3 +136,96 @@ L'installeur :
 - Test API : `Invoke-RestMethod http://localhost:3000/api/health -Headers @{ "X-Office-Token" = "<token>" }`
 
 Le token est écrit dans `C:\Cabinet\server\.env` — ne pas le communiquer.
+
+---
+
+# Installation sur Mac serveur
+
+Flow strictement équivalent à Windows, juste avec les conventions macOS.
+
+## 1. Télécharger le .pkg
+
+Depuis la page Releases GitHub, choisir selon le Mac :
+- `CabinetCenon-<version>-arm64.pkg` pour Mac M1/M2/M3/M4 (Apple Silicon)
+- `CabinetCenon-<version>-x64.pkg` pour Mac Intel (plus rare)
+
+Pour savoir lequel : `Menu Pomme → À propos de ce Mac → voir "Puce" ou "Processeur"`.
+
+## 2. Lancer l'install
+
+1. Double-cliquer sur le `.pkg` téléchargé.
+2. Si Gatekeeper affiche *"Cabinet Cenon.pkg ne peut pas être ouvert car Apple ne peut pas vérifier..."* :
+   - **Clic droit** (ou Ctrl+clic) sur le `.pkg` → **Ouvrir**
+   - Cliquer à nouveau **Ouvrir** dans la boîte de dialogue qui confirme
+   (Ou : `Réglages Système → Confidentialité et sécurité → Ouvrir quand même` pour le fichier bloqué)
+3. Suivre l'assistant d'installation : *Continuer → Installer → mot de passe administrateur*
+4. Le panneau final indique "Installation réussie"
+
+**Emplacements créés :**
+- `/Applications/Cabinet Cenon/` — binaires (Node.js, backend, frontend)
+- `/Library/Application Support/CabinetCenon/` — données : `data/cenon.db`, `logs/`, `backups/`
+- `/Library/LaunchDaemons/fr.cenon.cabinet.plist` — définition du daemon
+
+Le daemon est **chargé et démarré automatiquement** par l'installeur. Il redémarre au boot du Mac et après crash.
+
+## 3. Vérifier
+
+Dans Terminal :
+```bash
+sudo launchctl list | grep cenon
+# → Doit afficher PID numérique et fr.cenon.cabinet
+
+curl -H "X-Office-Token: $(sudo sed -n 's/^OFFICE_TOKEN=//p' '/Applications/Cabinet Cenon/server/.env')" http://localhost:3000/api/health
+# → {"status":"ok","version":0,"updatedAt":"...","node":"v22.11.0","uptimeSeconds":N}
+```
+
+Ouvrir `http://localhost:3000/` dans Safari → page login du cabinet.
+
+## 4. Pour les 4 postes cabinet
+
+Trouver l'IP LAN du Mac serveur :
+```bash
+ipconfig getifaddr en0    # ou en1 pour Wi-Fi
+```
+
+Sur chaque poste cabinet (Windows, Mac, ou autre), bookmarker `http://<ip-mac>:<port>/` dans le navigateur, comme décrit plus haut §3.
+
+## 5. Gestion du daemon
+
+| Action | Commande |
+|---|---|
+| Voir l'état | `sudo launchctl list \| grep cenon` |
+| Arrêter | `sudo launchctl unload /Library/LaunchDaemons/fr.cenon.cabinet.plist` |
+| Redémarrer | `sudo launchctl unload … && sudo launchctl load -w …` |
+| Logs | `tail -f "/Library/Application Support/CabinetCenon/logs/api-stderr.log"` |
+
+## 6. Désinstallation macOS
+
+Pas de désinstalleur natif `.pkg` (limitation du format Apple). Script manuel :
+```bash
+sudo launchctl unload /Library/LaunchDaemons/fr.cenon.cabinet.plist
+sudo rm /Library/LaunchDaemons/fr.cenon.cabinet.plist
+sudo rm -rf "/Applications/Cabinet Cenon"
+# Optionnel (supprime aussi les données) :
+# sudo rm -rf "/Library/Application Support/CabinetCenon"
+```
+
+## 7. Pare-feu macOS
+
+Par défaut **désactivé** sur macOS grand public. Si activé (Préférences Système → Réseau → Pare-feu) :
+- Le Mac affichera un prompt *"Souhaitez-vous autoriser node à accepter des connexions entrantes ?"* au premier démarrage du service → **Autoriser**.
+- Alternative CLI : `sudo /usr/libexec/ApplicationFirewall/socketfilterfw --add "/Applications/Cabinet Cenon/node/bin/node"`
+
+## 8. Mise à jour macOS
+
+Télécharger le nouveau `.pkg` et le lancer — l'installeur détecte la version précédente, arrête le daemon, remplace les fichiers, relance. Les données dans `/Library/Application Support/CabinetCenon/` sont préservées.
+
+## 9. Backup macOS
+
+Actuellement, la tâche planifiée Windows n'a pas d'équivalent automatique côté Mac (plus de dev pour un cron via launchd). Pour backup manuel :
+```bash
+sudo sqlite3 "/Library/Application Support/CabinetCenon/data/cenon.db" \
+  "VACUUM INTO '/Library/Application Support/CabinetCenon/backups/cenon-$(date +%Y%m%d).db'"
+```
+
+Planifier via `cron -e` ou créer un LaunchAgent — à faire manuellement. (À automatiser dans une version ultérieure si tu passes sur serveur Mac.)

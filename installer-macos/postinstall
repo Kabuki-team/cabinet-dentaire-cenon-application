@@ -1,0 +1,126 @@
+#!/bin/bash
+# Exécuté après la copie des fichiers. Écrit le .env, installe le daemon
+# launchd, le charge et fait un health check.
+#
+# Le placeholder __OFFICE_TOKEN__ est remplacé par build-pkg.sh avant packaging.
+
+set -e
+
+INSTALL_DIR="/Applications/Cabinet Cenon"
+DATA_ROOT="/Library/Application Support/CabinetCenon"
+OFFICE_TOKEN="__OFFICE_TOKEN__"
+PORT=3000
+PLIST_NAME="fr.cenon.cabinet.plist"
+PLIST_PATH="/Library/LaunchDaemons/${PLIST_NAME}"
+
+echo "=== Cabinet Cenon — Configuration post-install ==="
+echo "InstallDir : $INSTALL_DIR"
+echo "DataRoot   : $DATA_ROOT"
+echo "Port       : $PORT"
+
+# 1. Créer les dossiers data/logs/backups (préservés entre updates)
+mkdir -p "$DATA_ROOT/data" "$DATA_ROOT/logs" "$DATA_ROOT/backups"
+chmod 755 "$DATA_ROOT" "$DATA_ROOT/data" "$DATA_ROOT/logs" "$DATA_ROOT/backups"
+
+# 2. Écrire le .env
+ENV_FILE="$INSTALL_DIR/server/.env"
+cat > "$ENV_FILE" <<EOF
+# Généré automatiquement par l'installeur Cabinet Cenon — ne pas commiter.
+PORT=$PORT
+HOST=0.0.0.0
+OFFICE_TOKEN=$OFFICE_TOKEN
+DB_PATH=$DATA_ROOT/data/cenon.db
+STATIC_DIR=../dist
+LOG_LEVEL=info
+EOF
+chmod 600 "$ENV_FILE"
+
+# 3. Écrire le plist launchd (daemon qui démarre au boot, redémarre si crash)
+NODE_BIN="$INSTALL_DIR/node/bin/node"
+SERVER_JS="$INSTALL_DIR/server/dist/server.js"
+
+cat > "$PLIST_PATH" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>fr.cenon.cabinet</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>$NODE_BIN</string>
+        <string>--env-file=$ENV_FILE</string>
+        <string>$SERVER_JS</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>$INSTALL_DIR/server</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>NODE_ENV</key>
+        <string>production</string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+        <key>Crashed</key>
+        <true/>
+    </dict>
+
+    <key>ThrottleInterval</key>
+    <integer>5</integer>
+
+    <key>StandardOutPath</key>
+    <string>$DATA_ROOT/logs/api-stdout.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>$DATA_ROOT/logs/api-stderr.log</string>
+</dict>
+</plist>
+EOF
+
+chmod 644 "$PLIST_PATH"
+chown root:wheel "$PLIST_PATH"
+
+# 4. Charger le daemon (unload avant au cas où il traîne)
+/bin/launchctl unload "$PLIST_PATH" 2>/dev/null || true
+/bin/launchctl load -w "$PLIST_PATH"
+
+# 5. Health check (jusqu'à 10 s)
+sleep 3
+OK=0
+for i in 1 2 3 4 5; do
+    RESP=$(/usr/bin/curl -sS -m 3 -H "X-Office-Token: $OFFICE_TOKEN" "http://127.0.0.1:$PORT/api/health" 2>/dev/null || true)
+    if echo "$RESP" | grep -q '"status":"ok"'; then
+        OK=1
+        echo "API OK : $RESP"
+        break
+    fi
+    sleep 2
+done
+
+if [ "$OK" -eq 0 ]; then
+    echo "WARN : l'API ne répond pas. Consulter les logs :"
+    echo "  $DATA_ROOT/logs/api-stderr.log"
+    echo "  $DATA_ROOT/logs/api-stdout.log"
+fi
+
+# 6. Affichage info pour l'admin
+IP=$(/usr/sbin/ipconfig getifaddr en0 2>/dev/null || /usr/sbin/ipconfig getifaddr en1 2>/dev/null || echo "localhost")
+
+echo ""
+echo "=== Installation terminée ==="
+echo "Service launchd : fr.cenon.cabinet (chargé)"
+echo "URL locale     : http://localhost:$PORT/"
+echo "URL LAN        : http://$IP:$PORT/"
+echo ""
+echo "Pour les postes cabinet : bookmark http://$IP:$PORT/ dans Safari/Edge/Chrome."
+
+exit 0

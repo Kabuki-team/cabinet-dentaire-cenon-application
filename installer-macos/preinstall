@@ -1,0 +1,13 @@
+#!/bin/bash
+# Exécuté avant l'écrasement des fichiers lors d'une mise à jour.
+# Arrête le daemon launchd s'il tourne déjà pour libérer les fichiers.
+
+set +e  # ne pas échouer si le daemon n'existe pas encore
+
+PLIST="/Library/LaunchDaemons/fr.cenon.cabinet.plist"
+if [ -f "$PLIST" ]; then
+    echo "Cabinet Cenon : arrêt du daemon en cours..."
+    /bin/launchctl unload "$PLIST" 2>/dev/null
+fi
+
+exit 0
