@@ -6,7 +6,17 @@ import { getDB, saveDB } from '../lib/db';
 import { calculateSimilarity } from '../lib/similarity';
 import { formatToFrench } from '../lib/dateUtils';
 import { AdjustmentModal } from '../components/AdjustmentModal';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 import { listAdjustments, softDeleteAdjustment, restoreAdjustment, type ManualAdjustment } from '../lib/adjustments';
+
+type ConfirmState = {
+  title?: string;
+  message: string;
+  confirmLabel?: string;
+  cancelLabel?: string | null;
+  danger?: boolean;
+  onConfirm: () => void;
+};
 
 export function PatientDetail() {
   const navigate = useNavigate();
@@ -38,6 +48,7 @@ export function PatientDetail() {
   const [deletedAdjustments, setDeletedAdjustments] = useState<ManualAdjustment[]>([]);
   const [showDeletedAdjustments, setShowDeletedAdjustments] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [confirmState, setConfirmState] = useState<ConfirmState | null>(null);
 
   const handleExport = () => {
     if (!patient) return;
@@ -373,16 +384,29 @@ export function PatientDetail() {
     }
   }, [id, refreshKey]);
 
-  const handleDeleteAdjustment = async (adjId: number) => {
-    if (!window.confirm('Supprimer cet ajustement manuel ? Il sera déplacé dans la corbeille.')) return;
-    await softDeleteAdjustment(adjId);
-    setRefreshKey(k => k + 1);
+  const handleDeleteAdjustment = (adjId: number) => {
+    setConfirmState({
+      title: 'Supprimer l’ajustement',
+      message: 'Supprimer cet ajustement manuel ? Il sera déplacé dans la corbeille.',
+      confirmLabel: 'Supprimer',
+      danger: true,
+      onConfirm: async () => {
+        await softDeleteAdjustment(adjId);
+        setRefreshKey(k => k + 1);
+      },
+    });
   };
 
   const handleRestoreAdjustment = async (adjId: number) => {
     const ok = await restoreAdjustment(adjId);
     if (!ok) {
-      window.alert('Restauration impossible (patient introuvable).');
+      setConfirmState({
+        title: 'Restauration impossible',
+        message: 'Le patient associé est introuvable, la restauration a été annulée.',
+        confirmLabel: 'OK',
+        cancelLabel: null,
+        onConfirm: () => {},
+      });
       return;
     }
     setRefreshKey(k => k + 1);
@@ -434,17 +458,24 @@ export function PatientDetail() {
     setEditingContent('');
   };
 
-  const deleteComment = async (commentId: number) => {
-    const db = getDB();
-    if (!db || !id) return;
-    if (!window.confirm('Supprimer ce commentaire ?')) return;
-    db.run("DELETE FROM patient_comments WHERE id = ? AND patient_id = ?", [commentId, id]);
-    await saveDB();
-    setComments(prev => prev.filter(c => c.id !== commentId));
-    if (editingCommentId === commentId) {
-      setEditingCommentId(null);
-      setEditingContent('');
-    }
+  const deleteComment = (commentId: number) => {
+    setConfirmState({
+      title: 'Supprimer le commentaire',
+      message: 'Supprimer ce commentaire ? Cette action est définitive.',
+      confirmLabel: 'Supprimer',
+      danger: true,
+      onConfirm: async () => {
+        const db = getDB();
+        if (!db || !id) return;
+        db.run("DELETE FROM patient_comments WHERE id = ? AND patient_id = ?", [commentId, id]);
+        await saveDB();
+        setComments(prev => prev.filter(c => c.id !== commentId));
+        if (editingCommentId === commentId) {
+          setEditingCommentId(null);
+          setEditingContent('');
+        }
+      },
+    });
   };
 
   const saveAnnotation = async () => {
@@ -981,6 +1012,18 @@ export function PatientDetail() {
           existing={editingAdjustment}
           onClose={() => { setShowAdjustmentModal(false); setEditingAdjustment(null); }}
           onSaved={() => setRefreshKey(k => k + 1)}
+        />
+      )}
+
+      {confirmState && (
+        <ConfirmDialog
+          title={confirmState.title}
+          message={confirmState.message}
+          confirmLabel={confirmState.confirmLabel}
+          cancelLabel={confirmState.cancelLabel}
+          danger={confirmState.danger}
+          onConfirm={confirmState.onConfirm}
+          onClose={() => setConfirmState(null)}
         />
       )}
 

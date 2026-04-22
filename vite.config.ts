@@ -27,6 +27,14 @@ export default defineConfig({
     port: 5173,
     // Prevent Vite from jumping to 5174 if 5173 is busy (breaks Tauri dev URL)
     strictPort: true,
+    // Proxy /api to the local backend so the frontend can use relative URLs
+    // and avoid CORS in dev. Override the target via VITE_API_PROXY_TARGET if needed.
+    proxy: {
+      '/api': {
+        target: process.env.VITE_API_PROXY_TARGET ?? 'http://127.0.0.1:3456',
+        changeOrigin: false,
+      },
+    },
   },
 
 })

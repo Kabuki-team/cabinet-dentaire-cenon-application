@@ -2,12 +2,14 @@ import { Outlet, useLocation } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { Topbar } from './Topbar';
 import { AnimatePresence, motion } from 'framer-motion';
+import { OfflineBanner } from '../OfflineBanner';
 
 export function Layout() {
   const location = useLocation();
-  
+
   return (
     <div className="app-container">
+      <OfflineBanner />
       <Sidebar />
       <div className="main-content">
         <Topbar />

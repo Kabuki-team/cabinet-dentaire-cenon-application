@@ -10,7 +10,12 @@ permissions:
   contents: write
 
 jobs:
-  build:
+  # ---------------------------------------------------------------------------
+  # Job 1 : builds Tauri existants (MSI Windows + DMG macOS x2). Inchangé.
+  # Utiles pour Phase 2 (client cabinet natif avec JWT + HTTPS) et pour les
+  # admins qui veulent une app Tauri locale. N'est pas requis pour Phase 1.
+  # ---------------------------------------------------------------------------
+  build-tauri:
     strategy:
       fail-fast: false
       matrix:
@@ -30,7 +35,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
 
       - name: Install Rust stable
@@ -52,6 +57,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          VITE_OFFICE_TOKEN: ${{ secrets.VITE_OFFICE_TOKEN }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: 'Cabinet Dentaire Cenon ${{ github.ref_name }}'
@@ -60,3 +66,187 @@ jobs:
           prerelease: false
           includeUpdaterJson: true
           args: ${{ matrix.args }}
+
+  # ---------------------------------------------------------------------------
+  # Job 2 : installeur Windows tout-en-un pour le PC serveur du cabinet.
+  # Produit CabinetCenon-Setup-<version>.exe — l'admin double-clique, tout est
+  # installé (Node.js portable, better-sqlite3 natif, service NSSM, firewall,
+  # backup planifié). Les 4 postes cabinet ouvrent juste l'URL dans Edge.
+  # ---------------------------------------------------------------------------
+  build-installer:
+    runs-on: windows-latest
+    needs: []  # indépendant des builds Tauri, peut échouer sans les bloquer
+    env:
+      NODE_PORTABLE_VERSION: '22.11.0'   # LTS pinée pour reproductibilité
+      NSSM_VERSION: '2.24'
+      SQLITE_URL: 'https://www.sqlite.org/2024/sqlite-tools-win-x64-3470200.zip'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract tag version
+        id: version
+        shell: bash
+        run: |
+          REF="${{ github.ref_name }}"
+          # github.ref_name = "v1.2.3" sur tag ; "main" sur workflow_dispatch
+          if [[ "$REF" == v* ]]; then
+            echo "version=${REF#v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=0.0.0-${REF//\//-}-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Setup Node.js (pour build client + serveur dans le CI)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Vérifier que le secret VITE_OFFICE_TOKEN est défini
+        shell: bash
+        env:
+          TOKEN: ${{ secrets.VITE_OFFICE_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "::error::Le secret VITE_OFFICE_TOKEN n'est pas défini. Ajouter ce secret dans Settings → Secrets and variables → Actions."
+            exit 1
+          fi
+          if [ ${#TOKEN} -lt 32 ]; then
+            echo "::error::VITE_OFFICE_TOKEN trop court ( ${#TOKEN} chars). Minimum 32 — utiliser \`openssl rand -hex 32\`."
+            exit 1
+          fi
+          echo "VITE_OFFICE_TOKEN : OK (${#TOKEN} chars)"
+
+      - name: Build frontend (vite) avec token du secret
+        env:
+          VITE_OFFICE_TOKEN: ${{ secrets.VITE_OFFICE_TOKEN }}
+          VITE_SERVER_URL: ''   # same-origin : le backend sert aussi le frontend
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+
+      - name: Build backend TypeScript
+        run: |
+          cd server
+          npm ci --no-audit --no-fund
+          npm run build
+
+      - name: Installer les dépendances PROD du serveur dans bundle\server\node_modules
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path installer\bundle\server | Out-Null
+          Copy-Item server\dist         installer\bundle\server\dist -Recurse -Force
+          Copy-Item server\scripts      installer\bundle\server\scripts -Recurse -Force
+          Copy-Item server\package.json installer\bundle\server\ -Force
+          Copy-Item server\package-lock.json installer\bundle\server\ -Force
+          Push-Location installer\bundle\server
+          npm ci --omit=dev --no-audit --no-fund --ignore-scripts
+          # Rebuild explicite de better-sqlite3 pour win32-x64 au cas où les prebuild manquent.
+          # L'option --build-from-source est un fallback si prebuild-install échoue.
+          try {
+            npm rebuild better-sqlite3 --no-audit --no-fund
+          } catch {
+            Write-Warning "npm rebuild a échoué, tentative de compilation depuis les sources..."
+            npm install better-sqlite3 --build-from-source --no-audit --no-fund
+          }
+          Pop-Location
+
+      - name: Télécharger Node.js portable ${{ env.NODE_PORTABLE_VERSION }}
+        shell: pwsh
+        run: |
+          $ver = "${{ env.NODE_PORTABLE_VERSION }}"
+          $url = "https://nodejs.org/dist/v$ver/node-v$ver-win-x64.zip"
+          Write-Host "Download : $url"
+          Invoke-WebRequest -Uri $url -OutFile node.zip -UseBasicParsing
+          Expand-Archive node.zip -DestinationPath node-tmp
+          New-Item -ItemType Directory -Force -Path installer\bundle\node | Out-Null
+          # Node.js zip contient un dossier node-vX.Y.Z-win-x64/ → on aplatit
+          Get-ChildItem (Get-ChildItem node-tmp -Directory | Select-Object -First 1).FullName | ForEach-Object {
+            Move-Item $_.FullName installer\bundle\node -Force
+          }
+          # Trim : retirer les docs/markdown pour réduire la taille de l'installeur.
+          Get-ChildItem installer\bundle\node -Recurse -Include *.md,CHANGELOG*,LICENSE* -Force -ErrorAction SilentlyContinue |
+            Remove-Item -Force -ErrorAction SilentlyContinue
+          Remove-Item node.zip, node-tmp -Recurse -Force
+
+      - name: Télécharger NSSM ${{ env.NSSM_VERSION }}
+        shell: pwsh
+        run: |
+          $url = "https://nssm.cc/release/nssm-${{ env.NSSM_VERSION }}.zip"
+          Invoke-WebRequest -Uri $url -OutFile nssm.zip -UseBasicParsing
+          Expand-Archive nssm.zip -DestinationPath nssm-tmp
+          New-Item -ItemType Directory -Force -Path installer\bundle\bin | Out-Null
+          Copy-Item (Get-ChildItem nssm-tmp -Recurse -Filter 'nssm.exe' | Where-Object { $_.FullName -match 'win64' } | Select-Object -First 1).FullName installer\bundle\bin\nssm.exe -Force
+          Remove-Item nssm.zip, nssm-tmp -Recurse -Force
+
+      - name: Télécharger SQLite CLI (pour backup VACUUM INTO)
+        shell: pwsh
+        run: |
+          $url = "${{ env.SQLITE_URL }}"
+          Invoke-WebRequest -Uri $url -OutFile sqlite.zip -UseBasicParsing
+          Expand-Archive sqlite.zip -DestinationPath sqlite-tmp
+          Copy-Item (Get-ChildItem sqlite-tmp -Recurse -Filter 'sqlite3.exe' | Select-Object -First 1).FullName installer\bundle\bin\sqlite3.exe -Force
+          Remove-Item sqlite.zip, sqlite-tmp -Recurse -Force
+
+      - name: Copier le frontend buildé dans bundle\dist
+        shell: pwsh
+        run: |
+          Copy-Item dist installer\bundle\dist -Recurse -Force
+
+      - name: Compiler l'installeur Inno Setup
+        shell: pwsh
+        env:
+          VITE_OFFICE_TOKEN: ${{ secrets.VITE_OFFICE_TOKEN }}
+        run: |
+          $iscc = 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
+          if (-not (Test-Path $iscc)) {
+            Write-Host "Inno Setup pas pré-installé, installation via Chocolatey..."
+            choco install innosetup -y --no-progress
+          }
+          $version = "${{ steps.version.outputs.version }}"
+          & $iscc `
+            "/DMyAppVersion=$version" `
+            "/DOFFICE_TOKEN=$env:VITE_OFFICE_TOKEN" `
+            "/DPort=3000" `
+            installer\CabinetCenon.iss
+          if ($LASTEXITCODE -ne 0) { throw "iscc a échoué (exit $LASTEXITCODE)" }
+          Get-ChildItem installer\Output\*.exe | ForEach-Object {
+            Write-Host "Produit : $($_.FullName) ($([math]::Round($_.Length/1MB,2)) Mo)"
+          }
+
+      - name: Calculer SHA-256 de l'installeur
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem installer\Output\*.exe | Select-Object -First 1
+          $hash = (Get-FileHash -Algorithm SHA256 $exe.FullName).Hash.ToLower()
+          "$hash  $($exe.Name)" | Out-File -FilePath "$($exe.FullName).sha256" -Encoding ascii -NoNewline
+
+      - name: Upload artefacts (pour debug workflow_dispatch)
+        uses: actions/upload-artifact@v4
+        with:
+          name: installer-windows-${{ steps.version.outputs.version }}
+          path: |
+            installer/Output/*.exe
+            installer/Output/*.sha256
+          retention-days: 30
+
+      - name: Publier dans la Release GitHub (uniquement sur tag vX.Y.Z)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: 'Cabinet Dentaire Cenon ${{ github.ref_name }}'
+          draft: true                           # cohérent avec tauri-action (draft)
+          fail_on_unmatched_files: true
+          files: |
+            installer/Output/*.exe
+            installer/Output/*.sha256
+          body: |
+            ### Installeur Cabinet Cenon (PC serveur)
+            Télécharger `CabinetCenon-Setup-${{ steps.version.outputs.version }}.exe` et double-cliquer sur le PC serveur du cabinet.
+
+            Les 4 postes cabinet n'ont rien à installer : ouvrir dans Edge l'URL affichée par l'installeur à la fin (ex : `http://192.168.1.10:3000/`).
+
+            Vérifier le checksum SHA-256 : comparer avec le fichier `.sha256` joint.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
