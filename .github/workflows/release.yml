@@ -122,13 +122,13 @@ jobs:
           VITE_OFFICE_TOKEN: ${{ secrets.VITE_OFFICE_TOKEN }}
           VITE_SERVER_URL: ''   # same-origin : le backend sert aussi le frontend
         run: |
-          npm ci --no-audit --no-fund
+          npm install --no-audit --no-fund
           npm run build
 
       - name: Build backend TypeScript
         run: |
           cd server
-          npm ci --no-audit --no-fund
+          npm install --no-audit --no-fund
           npm run build
 
       - name: Installer les dépendances PROD du serveur dans bundle\server\node_modules
@@ -140,7 +140,7 @@ jobs:
           Copy-Item server\package.json installer\bundle\server\ -Force
           Copy-Item server\package-lock.json installer\bundle\server\ -Force
           Push-Location installer\bundle\server
-          npm ci --omit=dev --no-audit --no-fund --ignore-scripts
+          npm install --omit=dev --no-audit --no-fund --ignore-scripts
           # Rebuild explicite de better-sqlite3 pour win32-x64 au cas où les prebuild manquent.
           # L'option --build-from-source est un fallback si prebuild-install échoue.
           try {
