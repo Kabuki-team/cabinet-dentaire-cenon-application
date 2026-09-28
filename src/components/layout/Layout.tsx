@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { Topbar } from './Topbar';
@@ -6,6 +7,13 @@ import { OfflineBanner } from '../OfflineBanner';
 
 export function Layout() {
   const location = useLocation();
+  const contentRef = useRef<HTMLElement>(null);
+
+  // `.page-content` est le conteneur scrollable, pas la fenêtre : sans ça on arrive
+  // au milieu d'une page quand on navigue depuis une liste déjà défilée.
+  useEffect(() => {
+    contentRef.current?.scrollTo({ top: 0 });
+  }, [location.pathname]);
 
   return (
     <div className="app-container">
@@ -13,7 +21,7 @@ export function Layout() {
       <Sidebar />
       <div className="main-content">
         <Topbar />
-        <main className="page-content" style={{ position: 'relative' }}>
+        <main ref={contentRef} className="page-content" style={{ position: 'relative' }}>
           <AnimatePresence mode="wait">
             <motion.div
               key={location.pathname}

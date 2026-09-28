@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { usePersistedState } from '../lib/persistedState';
 import { TablePageSkeleton } from '../components/Skeleton';
 import { Search, ChevronRight, ChevronLeft, User, ShieldAlert, CheckCircle2, Link2, AlertTriangle } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
@@ -38,14 +39,14 @@ export function Patients() {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [patients, setPatients] = useState<any[]>([]);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [debouncedQuery, setDebouncedQuery] = useState('');
+  const [searchQuery, setSearchQuery] = usePersistedState('patients.recherche', '');
+  const [debouncedQuery, setDebouncedQuery] = useState(searchQuery);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
-  const [onlyNonSync, setOnlyNonSync] = useState(false);
-  const [onlyInactif, setOnlyInactif] = useState(false);
-  const [riskFilter, setRiskFilter] = useState<RiskFilter>('tous');
+  const [onlyNonSync, setOnlyNonSync] = usePersistedState('patients.nonSync', false);
+  const [onlyInactif, setOnlyInactif] = usePersistedState('patients.inactifs', false);
+  const [riskFilter, setRiskFilter] = usePersistedState<RiskFilter>('patients.risque', 'tous');
   const [confirmLink, setConfirmLink] = useState<{ patientId: string; patientName: string; suggestionId: string; suggestionName: string } | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 

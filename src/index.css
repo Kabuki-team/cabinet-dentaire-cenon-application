@@ -588,7 +588,12 @@ tbody tr:hover td { background: var(--fill-secondary); }
   to   { opacity: 1; transform: translateY(0); }
 }
 
-.animate-in { animation: fadeIn 0.25s var(--ease) both; }
+/* `backwards` et non `both` : avec `both`, le `transform: translateY(0)` de la dernière
+   keyframe reste appliqué après l'animation. Un transform non-`none` crée un bloc conteneur,
+   ce qui transforme tout `position: fixed` descendant en `position: absolute` — les modals
+   se mettaient alors à défiler avec la page. `backwards` couvre le delay de `.stagger` sans
+   laisser de transform résiduel. */
+.animate-in { animation: fadeIn 0.25s var(--ease) backwards; }
 
 @keyframes skeleton-shimmer {
   0%   { background-position: -400px 0; }

@@ -3,14 +3,15 @@ import { RevenuesSkeleton } from '../components/Skeleton';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, ResponsiveContainer, Legend, PieChart, Pie, Cell, Tooltip, ComposedChart, Line } from 'recharts';
 import { Download } from 'lucide-react';
 import { DateRangePicker } from '../components/DateRangePicker';
+import { usePeriodePartagee, usePersistedState } from '../lib/persistedState';
 import { getDB } from '../lib/db';
 import { exportCSV } from '../lib/exportCsv';
 
 const COLORS = ['#3b82f6', '#14b8a6', '#f59e0b', '#8b5cf6', '#f43f5e'];
 
 export function Revenues() {
-  const [activeTab, setActiveTab] = useState<'praticien' | 'acte' | 'evolution'>('praticien');
-  const [dateRange, setDateRange] = useState<{start: Date | null, end: Date | null}>({ start: null, end: null });
+  const [activeTab, setActiveTab] = usePersistedState<'praticien' | 'acte' | 'evolution'>('revenues.onglet', 'praticien');
+  const [dateRange, setDateRange] = usePeriodePartagee();
 
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState({ prod: 0, enc: 0, avgBasket: 0, patients: 0 });
@@ -231,7 +232,11 @@ export function Revenues() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.75rem' }} className="animate-in">
       <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-        <DateRangePicker onRangeChange={(s, e) => setDateRange({ start: s, end: e })} />
+        <DateRangePicker
+          initialDate={dateRange.start ?? undefined}
+          initialEndDate={dateRange.end ?? undefined}
+          onRangeChange={setDateRange}
+        />
       </div>
 
       {/* KPI strip */}

@@ -5,6 +5,7 @@ import { Dashboard } from './pages/Dashboard';
 import { Activity } from './pages/Activity';
 import { Patients } from './pages/Patients';
 import { PatientDetail } from './pages/PatientDetail';
+import { PraticienDetail } from './pages/PraticienDetail';
 import { Revenues } from './pages/Revenues';
 import { Imports } from './pages/Imports';
 import { Recouvrement } from './pages/Recouvrement';
@@ -28,6 +29,7 @@ function App() {
           <Route path="activity" element={<Activity />} />
           <Route path="patients" element={<Patients />} />
           <Route path="patients/:id" element={<PatientDetail />} />
+          <Route path="praticiens/:nom" element={<PraticienDetail />} />
           <Route path="revenues" element={<Revenues />} />
           <Route path="imports" element={<Imports />} />
           <Route path="recouvrement" element={<Recouvrement />} />

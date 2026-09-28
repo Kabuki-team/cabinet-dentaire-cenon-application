@@ -1,20 +1,20 @@
 import { useState, useEffect } from 'react';
-import { AlertTriangle, X, ChevronRight, Users, Calendar, TrendingUp, Wallet, Inbox } from 'lucide-react';
+import { AlertTriangle, X } from 'lucide-react';
 import { DashboardSkeleton } from '../components/Skeleton';
 import { ComposedChart, Bar, XAxis, YAxis, CartesianGrid, ResponsiveContainer, Tooltip, Legend, PieChart, Pie, Cell, Line, BarChart } from 'recharts';
 import { useNavigate } from 'react-router-dom';
 import { DateRangePicker } from '../components/DateRangePicker';
 import { getDB } from '../lib/db';
 import { formatToFrench } from '../lib/dateUtils';
+import { MAP_PRATICIENS, praticienUrl } from '../lib/praticiens';
+import { usePeriodePartagee } from '../lib/persistedState';
 
 const monthNames = ["Jan", "Fév", "Mar", "Avr", "Mai", "Juin", "Juil", "Août", "Sep", "Oct", "Nov", "Déc"];
 const COLORS = ['#3b82f6', '#14b8a6', '#f59e0b', '#8b5cf6', '#f43f5e'];
 
 export function Dashboard() {
   const navigate = useNavigate();
-  const [dateRange, setDateRange] = useState<{start: Date | null, end: Date | null}>({ start: null, end: null });
-  const [selectedPraticien, setSelectedPraticien] = useState<string | null>(null);
-  const [praticienDetails, setPraticienDetails] = useState<any[]>([]);
+  const [dateRange, setDateRange] = usePeriodePartagee();
   const [activeStatsTab, setActiveStatsTab] = useState('praticien');
   const [loading, setLoading] = useState(true);
   const [alerts, setAlerts] = useState<{ type: 'danger' | 'warning' | 'info'; msg: string; id: number }[]>([]);
@@ -179,17 +179,7 @@ export function Dashboard() {
 
         let dataPraticiensRevenus: any[] = [];
         if (pRRes.length > 0) {
-          const mapNames: Record<string, string> = { 
-            "RM": "Dr. Réda Mechouk",
-            "MF": "Dr. Medy Fakreldin",
-            "HG": "Dr. Hamza Gafsi",
-            "JL": "Dr. Jean Laborde Barbanegre",
-            "MFr": "Dr. Benoit Say-Liang-Fat",
-            "RMr": "Dr. Benoit Say-Liang-Fat",
-            "RMe": "Etudiant non Thèsé",
-            "MFe": "Etudiant non Thèsé"
-          };
-          
+          const mapNames = MAP_PRATICIENS;
           const agg: Record<string, number> = {};
           pRRes[0].values.forEach(v => {
             let nameStr = String(v[0]);
@@ -345,76 +335,6 @@ export function Dashboard() {
     } catch (e) { console.error(e); }
   }, []);
 
-  // Fetch practitioner details when selected
-  useEffect(() => {
-    const db = getDB();
-    if (!db || !selectedPraticien) return;
-
-    try {
-      let whereDateAppt = "";
-      let whereDateAct = "";
-      // We need arguments for the main query and the subqueries.
-      const argsProdEnc: string[] = [];
-      const argsAppt: string[] = [selectedPraticien];
-      
-      if (dateRange.start && dateRange.end) {
-         const tzOffsetStart = dateRange.start.getTimezoneOffset() * 60000;
-         const tzOffsetEnd = dateRange.end.getTimezoneOffset() * 60000;
-         const sd = new Date(dateRange.start.getTime() - tzOffsetStart).toISOString().split('T')[0];
-         const ed = new Date(dateRange.end.getTime() - tzOffsetEnd).toISOString().split('T')[0];
-         
-         whereDateAppt = " AND a.date >= ? AND a.date <= ?";
-         whereDateAct = " AND c.date >= ? AND c.date <= ?";
-         
-         argsAppt.push(sd, ed);
-         argsProdEnc.push(sd, ed);
-      }
-
-      // Group by patient to get their total production and encaissement over the period
-      const q = `
-        SELECT 
-          p.id, 
-          p.nom, 
-          p.prenom,
-          COUNT(a.id) as nb_consult,
-          MAX(a.date) as last_date,
-          (SELECT SUM(montant_acte) FROM financial_entries c WHERE c.patient_id = p.id ${whereDateAct}) as prod,
-          (SELECT SUM(reglement_somme) FROM financial_entries c WHERE c.patient_id = p.id ${whereDateAct}) as enc
-        FROM patients p
-        JOIN appointments a ON a.patient_id = p.id
-        WHERE a.praticien = ? AND a.statut = 'Vu' ${whereDateAppt}
-        GROUP BY p.id
-        ORDER BY prod DESC, last_date DESC
-        LIMIT 50
-      `;
-
-      // The execution requires the parameters in the correct order:
-      // Subquery 1 (prod): argsProdEnc
-      // Subquery 2 (enc): argsProdEnc
-      // Main Query (praticien & whereDateAppt): argsAppt
-      const finalArgs = [...argsProdEnc, ...argsProdEnc, ...argsAppt];
-
-      const res = db.exec(q, finalArgs);
-      if (res.length > 0) {
-         setPraticienDetails(res[0].values.map(v => ({
-            patientId: v[0],
-            patientName: `${v[2] || ''} ${v[1] || ''}`.trim(),
-            nbConsult: Number(v[3]) || 0,
-            date: v[4] ? formatToFrench(String(v[4])) : 'Date NC',
-            prod: Number(v[5]) || 0,
-            enc: Number(v[6]) || 0
-         })));
-      } else {
-        setPraticienDetails([]);
-      }
-
-    } catch(e) {
-      console.error(e);
-      setPraticienDetails([]);
-    }
-  }, [selectedPraticien, dateRange]);
-
-
   const CustomTooltip = ({ active, payload, label }: any) => {
     if (active && payload && payload.length) {
       return (
@@ -457,7 +377,11 @@ export function Dashboard() {
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.75rem' }} className="animate-in">
       {/* Barre d'actions */}
       <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-        <DateRangePicker onRangeChange={(s, e) => setDateRange({ start: s, end: e })} />
+        <DateRangePicker
+          initialDate={dateRange.start ?? undefined}
+          initialEndDate={dateRange.end ?? undefined}
+          onRangeChange={setDateRange}
+        />
       </div>
 
       {/* Alerts */}
@@ -592,7 +516,7 @@ export function Dashboard() {
                  <div
                    key={i}
                    style={{ cursor: 'pointer', padding: '0.75rem', borderRadius: 'var(--radius)', background: 'var(--bg)', border: '1px solid transparent', transition: 'all 0.15s' }}
-                   onClick={() => setSelectedPraticien(p.name)}
+                   onClick={() => navigate(praticienUrl(p.name, dateRange.start, dateRange.end))}
                    onMouseOver={(e) => { e.currentTarget.style.background = 'var(--primary-light)'; e.currentTarget.style.borderColor = 'var(--primary-mid)'; }}
                    onMouseOut={(e) => { e.currentTarget.style.background = 'var(--bg)'; e.currentTarget.style.borderColor = 'transparent'; }}
                  >
@@ -695,118 +619,6 @@ export function Dashboard() {
         </div>
       </div>
 
-      {selectedPraticien && (() => {
-        const totals = praticienDetails.reduce(
-          (acc, d) => ({
-            patients: acc.patients + 1,
-            consults: acc.consults + (d.nbConsult || 0),
-            prod: acc.prod + (d.prod || 0),
-            enc: acc.enc + (d.enc || 0),
-          }),
-          { patients: 0, consults: 0, prod: 0, enc: 0 }
-        );
-        const initials = selectedPraticien.split(' ').map(s => s[0]).filter(Boolean).slice(0, 2).join('').toUpperCase();
-        const formatEUR = (v: number) => v.toLocaleString('fr-FR', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 });
-        const periodeLabel = dateRange.start && dateRange.end
-          ? `du ${dateRange.start.toLocaleDateString('fr-FR')} au ${dateRange.end.toLocaleDateString('fr-FR')}`
-          : 'toutes périodes confondues';
-
-        return (
-        <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(2px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: '2rem' }} onClick={() => setSelectedPraticien(null)}>
-          <div style={{ width: '100%', maxWidth: '920px', maxHeight: '90vh', backgroundColor: 'var(--card)', boxShadow: 'var(--shadow-lg)', borderRadius: '1rem', display: 'flex', flexDirection: 'column', overflow: 'hidden' }} onClick={e => e.stopPropagation()}>
-            {/* Header */}
-            <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '1rem' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.875rem', minWidth: 0 }}>
-                <div style={{ width: '44px', height: '44px', borderRadius: '50%', backgroundColor: 'var(--primary-light)', color: 'var(--primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: '0.95rem', flexShrink: 0 }}>
-                  {initials || '?'}
-                </div>
-                <div style={{ minWidth: 0 }}>
-                  <h2 style={{ fontSize: '1.15rem', fontWeight: 600, margin: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{selectedPraticien}</h2>
-                  <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: '0.15rem 0 0 0' }}>Détails d'activité — {periodeLabel}</p>
-                </div>
-              </div>
-              <button className="btn btn-ghost" onClick={() => setSelectedPraticien(null)} style={{ padding: '0.5rem', flexShrink: 0 }} aria-label="Fermer">
-                <X size={20} />
-              </button>
-            </div>
-
-            {/* Summary KPIs */}
-            {praticienDetails.length > 0 && (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1px', backgroundColor: 'var(--border)', borderBottom: '1px solid var(--border)' }}>
-                {[
-                  { icon: <Users size={16} />, label: 'Patients', value: totals.patients.toString(), color: 'var(--primary)' },
-                  { icon: <Calendar size={16} />, label: 'Consultations', value: totals.consults.toString(), color: 'var(--text)' },
-                  { icon: <TrendingUp size={16} />, label: 'Production', value: formatEUR(totals.prod), color: 'var(--warning-text)' },
-                  { icon: <Wallet size={16} />, label: 'Encaissé', value: formatEUR(totals.enc), color: 'var(--success-text)' },
-                ].map((kpi, idx) => (
-                  <div key={idx} style={{ backgroundColor: 'var(--card)', padding: '0.875rem 1rem', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem', color: 'var(--text-muted)', fontSize: '0.7rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.03em' }}>
-                      {kpi.icon}
-                      <span>{kpi.label}</span>
-                    </div>
-                    <div style={{ fontSize: '1.1rem', fontWeight: 700, color: kpi.color, fontVariantNumeric: 'tabular-nums' }}>{kpi.value}</div>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* Table body */}
-            <div style={{ overflowY: 'auto', flex: 1, backgroundColor: 'var(--bg)' }}>
-              {praticienDetails.length === 0 ? (
-                <div style={{ padding: '3rem 1.5rem', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.75rem', color: 'var(--text-muted)' }}>
-                  <Inbox size={36} style={{ opacity: 0.5 }} />
-                  <p style={{ margin: 0, fontSize: '0.9rem' }}>Aucune consultation correspondante trouvée.</p>
-                </div>
-              ) : (
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontVariantNumeric: 'tabular-nums' }}>
-                  <thead style={{ position: 'sticky', top: 0, zIndex: 1 }}>
-                    <tr style={{ backgroundColor: 'var(--card)', boxShadow: '0 1px 0 var(--border)' }}>
-                      <th style={{ textAlign: 'left', padding: '0.75rem 1.5rem', fontSize: '0.7rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Dernière consult.</th>
-                      <th style={{ textAlign: 'left', padding: '0.75rem 1rem', fontSize: '0.7rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Patient</th>
-                      <th style={{ textAlign: 'right', padding: '0.75rem 1rem', fontSize: '0.7rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Production</th>
-                      <th style={{ textAlign: 'right', padding: '0.75rem 1rem', fontSize: '0.7rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Encaissé</th>
-                      <th style={{ width: '32px', padding: '0.75rem 1rem 0.75rem 0' }}></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {praticienDetails.map((det, i) => (
-                      <tr
-                        key={i}
-                        style={{ backgroundColor: i % 2 === 0 ? 'var(--card)' : 'var(--bg)', cursor: 'pointer', transition: 'background-color 0.15s' }}
-                        onClick={() => navigate(`/patients/${det.patientId}`)}
-                        onMouseOver={(e) => { e.currentTarget.style.backgroundColor = 'var(--primary-light)'; }}
-                        onMouseOut={(e) => { e.currentTarget.style.backgroundColor = i % 2 === 0 ? 'var(--card)' : 'var(--bg)'; }}
-                      >
-                        <td style={{ padding: '0.85rem 1.5rem', fontSize: '0.875rem', fontWeight: 500, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{det.date}</td>
-                        <td style={{ padding: '0.85rem 1rem', fontSize: '0.9rem' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-                            <span style={{ fontWeight: 600, color: 'var(--primary)' }}>{det.patientName}</span>
-                            {det.nbConsult > 1 && (
-                              <span className="badge badge-info" style={{ fontSize: '0.7rem', padding: '0.1rem 0.45rem', fontWeight: 600 }}>
-                                {det.nbConsult} RDV
-                              </span>
-                            )}
-                          </div>
-                        </td>
-                        <td style={{ padding: '0.85rem 1rem', fontSize: '0.9rem', textAlign: 'right', fontWeight: 500, color: det.prod > 0 ? 'var(--text)' : 'var(--text-muted)' }}>
-                          {det.prod > 0 ? formatEUR(det.prod) : '—'}
-                        </td>
-                        <td style={{ padding: '0.85rem 1rem', fontSize: '0.9rem', textAlign: 'right', fontWeight: 600, color: det.enc > 0 ? 'var(--success-text)' : 'var(--text-muted)' }}>
-                          {det.enc > 0 ? formatEUR(det.enc) : '—'}
-                        </td>
-                        <td style={{ padding: '0.85rem 1rem 0.85rem 0', textAlign: 'right', color: 'var(--text-muted)' }}>
-                          <ChevronRight size={16} />
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
-          </div>
-        </div>
-        );
-      })()}
     </div>
   );
 }

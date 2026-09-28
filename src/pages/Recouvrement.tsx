@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
+import { usePersistedState } from '../lib/persistedState';
 import { CheckCircle, Download, Search, ChevronLeft, ChevronRight, Edit3, AlertTriangle } from 'lucide-react';
 import { TablePageSkeleton } from '../components/Skeleton';
 import { useNavigate } from 'react-router-dom';
@@ -38,8 +39,8 @@ function getBadgeClass(tranche: Tranche) {
 export function Recouvrement() {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
-  const [tranche, setTranche] = useState<Tranche>('tous');
-  const [search, setSearch] = useState('');
+  const [tranche, setTranche] = usePersistedState<Tranche>('recouvrement.tranche', 'tous');
+  const [search, setSearch] = usePersistedState('recouvrement.recherche', '');
   const [page, setPage] = useState(1);
   const [all, setAll] = useState<any[]>([]);
   const [stats, setStats] = useState({ totalCreances: 0, nbPatients: 0, moyenneParPatient: 0, nbOverdue: 0, totalOverdue: 0 });

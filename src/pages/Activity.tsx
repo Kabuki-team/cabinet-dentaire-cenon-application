@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { usePersistedState } from '../lib/persistedState';
 import { DateRangePicker } from '../components/DateRangePicker';
 import { getDB } from '../lib/db';
 import { useNavigate } from 'react-router-dom';
@@ -29,8 +30,8 @@ export function Activity() {
   const _today = new Date();
   const _todayISO = `${_today.getFullYear()}-${String(_today.getMonth() + 1).padStart(2, '0')}-${String(_today.getDate()).padStart(2, '0')}`;
   const [loading, setLoading] = useState(true);
-  const [selectedDate, setSelectedDate] = useState<string>(_todayISO);
-  const [viewMode, setViewMode] = useState<'jour' | 'semaine'>('jour');
+  const [selectedDate, setSelectedDate] = usePersistedState<string>('activite.jour', _todayISO);
+  const [viewMode, setViewMode] = usePersistedState<'jour' | 'semaine'>('activite.vue', 'jour');
   const [data, setData] = useState<any[]>([]);
   const [stats, setStats] = useState({ vus: 0, reglements: 0 });
   const [weekData, setWeekData] = useState<{ date: string; vus: number; prod: number; enc: number }[]>([]);

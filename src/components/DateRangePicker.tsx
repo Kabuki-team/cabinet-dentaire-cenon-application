@@ -6,14 +6,16 @@ interface DateRangePickerProps {
   onRangeChange?: (start: Date | null, end: Date | null) => void;
   singleDate?: boolean;
   initialDate?: Date;
+  /** Borne de fin en mode plage, pour restaurer une période venue de l'URL. */
+  initialEndDate?: Date;
 }
 
-export function DateRangePicker({ onRangeChange, singleDate, initialDate }: DateRangePickerProps) {
+export function DateRangePicker({ onRangeChange, singleDate, initialDate, initialEndDate }: DateRangePickerProps) {
   const [isOpen, setIsOpen] = useState(false);
   const _now = new Date();
   const defaultD = initialDate || new Date(_now.getFullYear(), _now.getMonth(), 1);
   const [startDate, setStartDate] = useState<Date | null>(defaultD);
-  const [endDate, setEndDate] = useState<Date | null>(initialDate ? defaultD : new Date(_now.getFullYear(), _now.getMonth() + 1, 0));
+  const [endDate, setEndDate] = useState<Date | null>(initialEndDate ?? (initialDate ? defaultD : new Date(_now.getFullYear(), _now.getMonth() + 1, 0)));
   const [currentMonth, setCurrentMonth] = useState(defaultD);
   const [hoverDate, setHoverDate] = useState<Date | null>(null);
   const [activeDates, setActiveDates] = useState<Set<string>>(new Set());
@@ -41,9 +43,10 @@ export function DateRangePicker({ onRangeChange, singleDate, initialDate }: Date
     if (initialDate) {
       setStartDate(initialDate);
       if (singleDate) setEndDate(initialDate);
+      else if (initialEndDate) setEndDate(initialEndDate);
       setCurrentMonth(new Date(initialDate.getFullYear(), initialDate.getMonth(), 1));
     }
-  }, [initialDate]);
+  }, [initialDate, initialEndDate]);
 
   // Ensure current month is visible when opening
   useEffect(() => {
